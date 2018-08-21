@@ -6,4 +6,11 @@
 
 编译方法：gcc libdebug.c ip_client.c -o ip_client
 
-运行方法：./ip_client -h
+运行方法：
+    1）获取帮助
+
+      ./ip_client -h
+
+    2）运行
+
+      ./ip_client -H 172.16.132.1 -D 80 -r -dddd
