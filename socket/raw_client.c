@@ -250,6 +250,7 @@ static void help(void)
 	printf("\t-P %-20sdst port\n", "<PORT>");
 	printf("\t-l %-20slayer 3 proto\n", "<STRING>");
 	printf("\t-L %-20slayer 4 proto\n", "<STRING>");
+	printf("\t-w %-20sWindow of TCP\n", "<NUM>");
 	printf("\t-e %-20sCode of PPPoE\n", "<STRING>");
 	printf("\t-s %-20sSessionID of PPPoE\n", "<NUM>");
 	printf("\t-t %-20stags\n", "<NUM>");
@@ -272,118 +273,126 @@ int main (int argc, char **argv)
 	memset(&opt_value, 0, sizeof(opt_value));
 	raw_cmd = argv[0];
 
-	while ((opt = getopt(argc, argv, "o:m:M:a:A:p:P:l:L:e:s:t:c:rdh")) != -1) {
+	while ((opt = getopt(argc, argv, "o:m:M:a:A:p:P:l:L:w:e:s:t:c:rdh")) != -1) {
 		switch (opt) {
-			case 'o':
-				strncpy(opt_value.ifname, optarg, sizeof(opt_value.ifname) - 1);
-				opt_value.opt |= MyOIf;
-				break;
-			case 'm':
-				get_mac_from_string(optarg, opt_value.smac, opt);
-				opt_value.opt |= MySMAC;
-				break;
-			case 'M':
-				get_mac_from_string(optarg, opt_value.dmac, opt);
-				opt_value.opt |= MyDMAC;
-				break;
-			case 'a':{
-				__u32 addr;
-				ret = inet_addr(optarg);
-				if(ret != -1){
-					addr = (__u32)ret;
-					ret = 0;/* Success */
-				}
-				check_param_err();
-				opt_value.opt |= MySIP;
-				opt_value.saddr = addr;
-				break;
+		case 'o':
+			strncpy(opt_value.ifname, optarg, sizeof(opt_value.ifname) - 1);
+			opt_value.opt |= MyOIf;
+			break;
+		case 'm':
+			get_mac_from_string(optarg, opt_value.smac, opt);
+			opt_value.opt |= MySMAC;
+			break;
+		case 'M':
+			get_mac_from_string(optarg, opt_value.dmac, opt);
+			opt_value.opt |= MyDMAC;
+			break;
+		case 'a':{
+			__u32 addr;
+			ret = inet_addr(optarg);
+			if(ret != -1){
+				addr = (__u32)ret;
+				ret = 0;/* Success */
 			}
-			case 'A':{
-				__u32 addr;
-				ret = inet_addr(optarg);
-				if(ret != -1){
-					addr = (__u32)ret;
-					ret = 0;/* Success */
-				}
-				check_param_err();
-				opt_value.opt |= MyDIP;
-				opt_value.daddr = addr;
-				break;
+			check_param_err();
+			opt_value.opt |= MySIP;
+			opt_value.saddr = addr;
+			break;
+		}
+		case 'A':{
+			__u32 addr;
+			ret = inet_addr(optarg);
+			if(ret != -1){
+				addr = (__u32)ret;
+				ret = 0;/* Success */
 			}
-			case 'p':
-				ret = atoi(optarg);
-				if(ret > 65535)
-					ret = -1;
-				check_param_err();
-				opt_value.opt |= MySPort;
-				opt_value.sport = (__u16)ret;
-				break;
-			case 'P':
-				ret = atoi(optarg);
-				if(ret > 65535)
-					ret = -1;
-				check_param_err();
-				opt_value.opt |= MyDPort;
-				opt_value.dport = (__u16)ret;
-				break;
-			case 'l':
-				ret = get_proto_by_name(optarg, l3);
-				if(ret == 0)
-					ret = -1;
-				check_param_err();
-				opt_value.opt |= MyL3Protocol;
-				opt_value.l3proto = (__u16)ret;
-				break;
-			case 'L':
-				ret = get_proto_by_name(optarg, l4);
-				if(ret == 0)
-					ret = -1;
-				check_param_err();
-				opt_value.opt |= MyL4Protocol;
-				opt_value.l4proto = (__u8)ret;
-				break;
-			case 'e':
-				ret = get_proto_by_name(optarg, pppoe_code);
-				if(ret == 0)
-					ret = -1;
-				check_param_err();
-				opt_value.opt |= MyPCode;
-				opt_value.pcode = (__u8)ret;
-				break;
-			case 's':
-				ret = atoi(optarg);
-				if(ret > 65535 || !ret)
-					ret = -1;
-				check_param_err();
-				opt_value.opt |= MyPSID;
-				opt_value.psid = (__u16)ret;
-				break;
-			case 't':
-				ret = atoi(optarg);
-				if(ret > 4096)
-					ret = -1;
-				check_param_err();
-				opt_value.opt |= MyTag;
-				opt_value.tag = (__u16)ret;
-				break;
-			case 'c':
-				ret = atoi(optarg);
-				check_param_err();
-				count = ret;
-				break;
-			case 'r':
-				need_recv = 1;
-				break;
-			case 'd':
-				debug_switch++;
-				break;
-			case 'h':
-				help();
-				break;
-			default:
-				printf("param error.\n");
-				help();
-				break;
+			check_param_err();
+			opt_value.opt |= MyDIP;
+			opt_value.daddr = addr;
+			break;
+		}
+		case 'p':
+			ret = atoi(optarg);
+			if(ret > 65535)
+				ret = -1;
+			check_param_err();
+			opt_value.opt |= MySPort;
+			opt_value.sport = (__u16)ret;
+			break;
+		case 'P':
+			ret = atoi(optarg);
+			if(ret > 65535)
+				ret = -1;
+			check_param_err();
+			opt_value.opt |= MyDPort;
+			opt_value.dport = (__u16)ret;
+			break;
+		case 'l':
+			ret = get_proto_by_name(optarg, l3);
+			if(ret == 0)
+				ret = -1;
+			check_param_err();
+			opt_value.opt |= MyL3Protocol;
+			opt_value.l3proto = (__u16)ret;
+			break;
+		case 'L':
+			ret = get_proto_by_name(optarg, l4);
+			if(ret == 0)
+				ret = -1;
+			check_param_err();
+			opt_value.opt |= MyL4Protocol;
+			opt_value.l4proto = (__u8)ret;
+			break;
+		case 'w':
+			ret = atoi(optarg);
+			if((ret < 200) || (ret > 65535))
+				ret = -1;
+			check_param_err();
+			opt_value.opt |= MyTCPWindow;
+			opt_value.window = (__u16)ret;
+			break;
+		case 'e':
+			ret = get_proto_by_name(optarg, pppoe_code);
+			if(ret == 0)
+				ret = -1;
+			check_param_err();
+			opt_value.opt |= MyPCode;
+			opt_value.pcode = (__u8)ret;
+			break;
+		case 's':
+			ret = atoi(optarg);
+			if(ret > 65535 || !ret)
+				ret = -1;
+			check_param_err();
+			opt_value.opt |= MyPSID;
+			opt_value.psid = (__u16)ret;
+			break;
+		case 't':
+			ret = atoi(optarg);
+			if(ret > 4096)
+				ret = -1;
+			check_param_err();
+			opt_value.opt |= MyTag;
+			opt_value.tag = (__u16)ret;
+			break;
+		case 'c':
+			ret = atoi(optarg);
+			check_param_err();
+			count = ret;
+			break;
+		case 'r':
+			need_recv = 1;
+			break;
+		case 'd':
+			debug_switch++;
+			break;
+		case 'h':
+			help();
+			break;
+		default:
+			printf("param error.\n");
+			help();
+			break;
 		}
 	}
 

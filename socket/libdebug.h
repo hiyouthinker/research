@@ -40,22 +40,24 @@ struct opt_value_s{
 	__u8 l4proto;
 	__u8 pcode;	/* Code of PPPoE */
 	__u8 psid;	/* SessionID of PPPoE */
+	__u16 window;	/* for TCP */
 };
 
-#define MyCopyRight	"Copyright: BigBrother"
+#define MyCopyRight	"Copyright: Version 2.0 @BigBro/2020"
 
-#define MySMAC 		0x0001
-#define MyDMAC 		0x0002
-#define MySIP 		0x0004
-#define MyDIP 		0x0008
+#define MySMAC 			0x0001
+#define MyDMAC 			0x0002
+#define MySIP 			0x0004
+#define MyDIP 			0x0008
 #define MySPort 		0x0010
 #define MyDPort 		0x0020
 #define MyL3Protocol 	0x0040
 #define MyL4Protocol 	0x0080
-#define MyPCode 		0x0100
-#define MyPSID 		0x0200
-#define MyTag 		0x0400
-#define MyOIf 		0x0800
+#define MyTCPWindow		0x0100
+#define MyPCode 		0x0200
+#define MyPSID 			0x0400
+#define MyTag 			0x0800
+#define MyOIf 			0x1000
 
 #define L2INFO		(MySMAC | MyDMAC | MyL3Protocol | MyOIf)
 #define L3INFO		(MyL4Protocol | MySIP | MyDIP)

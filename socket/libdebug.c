@@ -13,12 +13,10 @@
 #include <netinet/ip.h>
 #include <linux/icmp.h>
 #include <linux/igmp.h>
+#include <time.h>
 #include "libdebug.h"
 
 #define CSUM_MANGLED_0 ((__sum16)0xffff)
-
-static unsigned int seq = 0x3456;
-static unsigned int ack = 0x0000;
 
 char cmd_and_param[256];
 int debug_switch = 0;
@@ -131,7 +129,7 @@ static int build_tcp_options(__be32 *p)
 	return 4*3;
 }
 
-static int build_l4_packet(int proto, void *l4, struct iphdr *iph)
+static int build_l4_packet(int proto, void *l4, void *param, struct iphdr *iph)
 {      
 	struct tcphdr *th;
 	struct udphdr *uh;
@@ -139,58 +137,70 @@ static int build_l4_packet(int proto, void *l4, struct iphdr *iph)
 	char *l4_data;
 	__wsum wsum = 0;
 
-	switch(proto){
-		case IPPROTO_TCP:/* Build a SYN */
-			l4_head_len = sizeof(*th);
-			th = l4;
-			th->source	= htons(sport++);
-			th->dest		= htons(dport);
-			th->seq		= htonl(seq++);
-			th->ack_seq	= htonl(ack);
-			th->window = htons(65535);
-			th->check = 0;
-			th->urg_ptr = 0;
-			l4_head_len += build_tcp_options((__be32 *)(th + 1));
-			/* The Length of TCP Header */
-			*(((__be16 *)th) + 6)	= htons((l4_head_len >> 2) << 12 | 0);
-			th->syn = 1;
-			th->check = tcp_v4_check(l4_head_len + l4_data_len, iph->saddr, iph->daddr,
-							 csum_partial(th, th->doff << 2, wsum));
-			iph->tot_len = htons(sizeof(struct iphdr) + l4_head_len + l4_data_len);
-			break;
-		case IPPROTO_UDP:
-			l4_head_len = sizeof(*uh);
-			l4_data_len = udp_size;
-			iph->tot_len = htons(sizeof(struct iphdr) + l4_head_len + l4_data_len);
-			uh = l4;
-			uh->source 	= htons(sport++);
-			uh->dest 	= htons(dport);
-			uh->len 		= htons(l4_head_len);
-			uh->check 	= 0;
-			if(l4_data_len){
-				l4_data = l4 + l4_head_len;
-				memset(l4_data, 'a', l4_data_len);
-				wsum = csum_partial(l4_data, l4_data_len, 0);
-			}
-			uh->check = udp_v4_check(l4_head_len + l4_data_len, iph->saddr, iph->daddr, 
-							csum_partial(uh, l4_head_len, wsum));
-			if (uh->check == 0)
-				uh->check = CSUM_MANGLED_0;
-			break;
-		default:
-			return 0;
+	static unsigned int seq = 0x0000;
+	static unsigned int ack = 0x0000;
+
+	if (!seq) {
+		srandom(time(NULL));
+		seq = random();
+	}
+
+	switch (proto) {
+	case IPPROTO_TCP: {	/* Build a SYN */
+		struct opt_value_s *ov = param;
+
+		l4_head_len = sizeof(*th);
+		th = l4;
+		th->source	= (ov && ov->sport) ? htons(ov->sport) : htons(sport++);
+		th->dest	= (ov && ov->dport) ? htons(ov->dport) : htons(dport);
+		th->seq		= htonl(seq++);
+		th->ack_seq	= htonl(ack);
+		th->window	= (ov && ov->window) ? htons(ov->window) : htons(65535);
+		th->check = 0;
+		th->urg_ptr = 0;
+		l4_head_len += build_tcp_options((__be32 *)(th + 1));
+		/* The Length of TCP Header */
+		*(((__be16 *)th) + 6)	= htons((l4_head_len >> 2) << 12 | 0);
+		th->syn = 1;
+		th->check = tcp_v4_check(l4_head_len + l4_data_len, iph->saddr, iph->daddr,
+						 csum_partial(th, th->doff << 2, wsum));
+		iph->tot_len = htons(sizeof(struct iphdr) + l4_head_len + l4_data_len);
+		break;
+	}
+	case IPPROTO_UDP: {
+		l4_head_len = sizeof(*uh);
+		l4_data_len = udp_size;
+		iph->tot_len = htons(sizeof(struct iphdr) + l4_head_len + l4_data_len);
+		uh = l4;
+		uh->source 	= htons(sport++);
+		uh->dest 	= htons(dport);
+		uh->len 		= htons(l4_head_len);
+		uh->check 	= 0;
+		if(l4_data_len){
+			l4_data = l4 + l4_head_len;
+			memset(l4_data, 'a', l4_data_len);
+			wsum = csum_partial(l4_data, l4_data_len, 0);
+		}
+		uh->check = udp_v4_check(l4_head_len + l4_data_len, iph->saddr, iph->daddr, 
+						csum_partial(uh, l4_head_len, wsum));
+		if (uh->check == 0)
+			uh->check = CSUM_MANGLED_0;
+		break;
+	}
+	default:
+		return 0;
 	}
 	return l4_head_len + l4_data_len;
 }
 
-static int build_tcp_packet(void *l4, struct iphdr *iph)
+static int build_tcp_packet(void *l4, void *param, struct iphdr *iph)
 {
-	return build_l4_packet(IPPROTO_TCP, l4, iph);
+	return build_l4_packet(IPPROTO_TCP, l4, param, iph);
 }
 
-static int build_udp_packet(void *l4, struct iphdr *iph)
+static int build_udp_packet(void *l4, void *param, struct iphdr *iph)
 {
-	return build_l4_packet(IPPROTO_UDP, l4, iph);
+	return build_l4_packet(IPPROTO_UDP, l4, param, iph);
 }
 
 int build_ip_packet(void *l3, void *param, __u8 proto)
@@ -199,33 +209,34 @@ int build_ip_packet(void *l3, void *param, __u8 proto)
 	struct iphdr *iph = l3;
 	struct opt_value_s *ov = param;
 
+	srandom(time(NULL));
+
 	iph->version = 4;
 	iph->ihl = 5;
 	iph->id = random();
 	iph->frag_off = 0;
 	iph->ttl = 64;
 	iph->check = 0;
-		
-	if(ov){
+
+	if (ov) {
 		iph->protocol = ov->l4proto;
 		iph->saddr = ov->saddr;
 		iph->daddr = ov->daddr;
 		proto = ov->l4proto;
-	}
-	else{
+	} else {
 		iph->protocol = proto;
-		if(local_ip)
+		if (local_ip)
 			iph->saddr = inet_addr(local_ip);
 		else
 			iph->saddr = (unsigned int)random();
 	}
-	
-	switch(proto){
+
+	switch (proto) {
 		case IPPROTO_TCP:
-			len = build_tcp_packet(l3 + iph->ihl * 4, iph);
+			len = build_tcp_packet(l3 + iph->ihl * 4, param, iph);
 			break;
 		case IPPROTO_UDP:
-			len = build_udp_packet(l3 + iph->ihl * 4, iph);
+			len = build_udp_packet(l3 + iph->ihl * 4, NULL, iph);
 			break;
 		case IPPROTO_ICMP:
 			
@@ -261,17 +272,19 @@ unsigned short tcpudp_packet_port(char *packet, int dir)
 
 int set_tcp_keepalive(int fd, int keepalive)
 {
-	int val = 60;
+	int val ;
 
-	setsockopt(fd, SOL_SOCKET, TCP_KEEPINTVL, (void *)&val, sizeof(val));
-
-	val = 30;
-	setsockopt(fd, SOL_SOCKET, TCP_KEEPIDLE, (void *)&val, sizeof(val));
+	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive, sizeof(keepalive));
 
 	val = 5;
-	setsockopt(fd, SOL_SOCKET, TCP_KEEPCNT, (void *)&val, sizeof(val));
-		
-	return setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive, sizeof(keepalive));
+	setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, (void *)&val, sizeof(val));
+
+	val = 2;
+	setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, (void *)&val, sizeof(val));
+
+	val = 3;
+	setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&val, sizeof(val));
+	return 0;
 }
 
 char *getopt_simple(int argc, char **argv)
