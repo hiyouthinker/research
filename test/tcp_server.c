@@ -36,12 +36,12 @@ re_recv:
 
 	switch (ret) {
 	case 0:
-		printf("recv: %s, prepare to close fd and exit\n", strerror(errno));
+		printf("recv(0): %s, prepare to close fd and exit\n", strerror(errno));
 		close(fd);
 		exit(1);
 		break;
 	case -1:
-		printf("recv: %s, prepare to close fd and exit\n", strerror(errno));
+		printf("recv(-1): %s, prepare to close fd and exit\n", strerror(errno));
 		sleep(2);
 		close(fd);
 		exit(1);
@@ -50,7 +50,10 @@ re_recv:
 		printf("recv length: %s\n", rbuf);
 		sprintf(sbuf, "Hello! From %d\n", pid);
 		send(fd, sbuf, strlen(sbuf), 0);
-		if (*rbuf == 'q') {
+		if (!strcmp(rbuf, "qw")) {
+			printf("shutdown for writing\n");
+			shutdown(fd, SHUT_WR);
+		} else if (*rbuf == 'q') {
 			printf("quiting\n");
 			close(fd);
 			exit(0);
