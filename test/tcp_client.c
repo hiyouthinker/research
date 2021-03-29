@@ -14,15 +14,26 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+static void usage(char *cmd)
+{
+	printf("usage: %s\n", cmd);
+	printf("\t-h\tshow this help\n");
+	printf("\t-d\tDST-IP\n");
+	printf("\t-D\tDST-PORT\n");
+	printf("\t-s\tSRC-IP\n");
+	printf("\t-S\tSRC-PORT\n");
+	exit(0);
+}
+
 int main(int argc, char *argv[])
 {
 	int opt, fd = -1, len, ret;
-	char *dip = "127.0.0.1";
+	char *sip = NULL, *dip = "127.0.0.1";
 	char buf[128];
 	struct sockaddr_in addr;
 	int sport = 0, dport = 80;
 
-	while ((opt = getopt(argc, argv, "d:D:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:D:s:S:h")) != -1) {
 		switch (opt) {
 		case 'd':
 			dip = optarg;
@@ -31,6 +42,17 @@ int main(int argc, char *argv[])
 			dport = atoi(optarg);
 			if (dport <= 0)
 				dport = 8000;
+			break;
+		case 's':
+			sip = optarg;
+			break;
+		case 'S':
+			sport = atoi(optarg);
+			if (sport <= 0)
+				sport = 0;
+			break;
+		case 'h':
+			usage(argv[0]);
 			break;
 		default:
 			break;
@@ -45,12 +67,27 @@ int main(int argc, char *argv[])
 		goto error;
 	}
 
+	if (sip || sport) {
+		memset(&addr, 0, sizeof(addr));
+		addr.sin_family = AF_INET;
+		if (sport)
+			addr.sin_port = htons(sport);
+		if (sip)
+			addr.sin_addr.s_addr = inet_addr(sip);
+
+		if (bind(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) < 0) {
+			perror("bind");
+			goto error;
+		}
+	}
+
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(dport);
 	addr.sin_addr.s_addr = inet_addr(dip);
 	len = sizeof(struct sockaddr_in);
 
-	printf("Prepare to connect to %s:%d\n", dip, dport);
+	printf("Prepare to connect to %s:%d from %s:%d\n"
+		, dip, dport, sip ?: "0.0.0.0", sport);
 	if (connect(fd, (struct sockaddr *)&addr, len) < 0) {
 		perror("connect");
 		goto error;
