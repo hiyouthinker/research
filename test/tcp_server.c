@@ -19,22 +19,26 @@
 #define TCP_KEEPINTVL	5	/* Interval between keepalives */
 #define TCP_KEEPCNT		6	/* Number of keepalives before death */
 
-static void usage(void)
+static void usage(char *cmd)
 {
-	printf("Nothing\n");
+	printf("usage: %s\n", cmd);
+	printf("\t-h\tshow this help\n");
+	printf("\t-l\tLocal IP\n");
+	printf("\t-p\tLocal Port\n");
+	printf("\t-r\tenable reuseaddr\n");
+	printf("\t-R\tenable reuseport\n");
+	printf("\t-k\tenable keepalive\n");
 	exit(0);
 }
+
 
 static int child_process_packets(int fd, int pid)
 {
 	char rbuf[1024], sbuf[1024];
-	int ret;
 
 re_recv:
 	memset(rbuf, 0, sizeof(rbuf));
-	ret = recv(fd, rbuf, sizeof(rbuf), 0);
-
-	switch (ret) {
+	switch (recv(fd, rbuf, sizeof(rbuf), 0)) {
 	case 0:
 		printf("recv(0): %s, prepare to close fd and exit\n", strerror(errno));
 		close(fd);
@@ -48,13 +52,13 @@ re_recv:
 		break;
 	default:
 		printf("recv length: %s\n", rbuf);
-		sprintf(sbuf, "Hello! From %d\n", pid);
+		sprintf(sbuf, "Hello! from %d\n", pid);
 		send(fd, sbuf, strlen(sbuf), 0);
 		if (!strcmp(rbuf, "qw")) {
 			printf("shutdown for writing\n");
 			shutdown(fd, SHUT_WR);
 		} else if (*rbuf == 'q') {
-			printf("quiting\n");
+			printf("quit\n");
 			close(fd);
 			exit(0);
 		}
@@ -64,7 +68,7 @@ re_recv:
 
 int main(int argc, char *argv[])
 {
-	int opt, fd = -1, port = 80, len, ret;
+	int opt, fd = -1, port = 80, len;
 	char *local_ip = "0.0.0.0";
 	struct sockaddr_in addr;
 	int reuseaddr = 0, reuseport = 0, accept_fd;
@@ -91,7 +95,7 @@ int main(int argc, char *argv[])
 			break;
 		default:
 		case 'h':
-			usage();
+			usage(argv[0]);
 			break;
 		}
 	}
