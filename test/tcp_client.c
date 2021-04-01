@@ -14,6 +14,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#define TCP_QUICKACK		12	/* Block/reenable quick acks */
+
 static void usage(char *cmd)
 {
 	printf("usage: %s\n", cmd);
@@ -22,18 +24,19 @@ static void usage(char *cmd)
 	printf("\t-D\tDST-PORT\n");
 	printf("\t-s\tSRC-IP\n");
 	printf("\t-S\tSRC-PORT\n");
+	printf("\t-p\tenable pingpong\n");
 	exit(0);
 }
 
 int main(int argc, char *argv[])
 {
-	int opt, fd = -1, len, ret;
+	int opt, fd = -1, len, pingpong = 0;
 	char *sip = NULL, *dip = "127.0.0.1";
 	char buf[128];
 	struct sockaddr_in addr;
 	int sport = 0, dport = 80;
 
-	while ((opt = getopt(argc, argv, "d:D:s:S:h")) != -1) {
+	while ((opt = getopt(argc, argv, "d:D:s:S:ph")) != -1) {
 		switch (opt) {
 		case 'd':
 			dip = optarg;
@@ -50,6 +53,9 @@ int main(int argc, char *argv[])
 			sport = atoi(optarg);
 			if (sport <= 0)
 				sport = 0;
+			break;
+		case 'p':
+			pingpong = 1;
 			break;
 		case 'h':
 			usage(argv[0]);
@@ -86,27 +92,41 @@ int main(int argc, char *argv[])
 	addr.sin_addr.s_addr = inet_addr(dip);
 	len = sizeof(struct sockaddr_in);
 
-	printf("Prepare to connect to %s:%d from %s:%d\n"
-		, dip, dport, sip ?: "0.0.0.0", sport);
+	printf("Prepare to connect to %s:%d from %s:%d, and pingpong is %s\n"
+		, dip, dport, sip ?: "0.0.0.0", sport, pingpong ? "enable" : "disable");
+
+
+	if (pingpong) {
+		int quick_ack_off = 0;
+		if (setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, (void *)&quick_ack_off, sizeof(quick_ack_off)) < 0) {
+			printf("setsockopt for TCP_QUICKACK: %s\n", strerror(errno));
+		}
+	}
+
 	if (connect(fd, (struct sockaddr *)&addr, len) < 0) {
 		perror("connect");
 		goto error;
 	}
-
 	printf("connect successful\n");
+
+	if (pingpong) {
+		sprintf(buf, "%s", "pingpong test from bigbro.");
+		if (send(fd, buf, strlen(buf), 0) <= 0) {
+			printf("send: %s\n", strerror(errno));
+			goto error;
+		}
+	}
 
 	sprintf(buf, "%s", "client - 1");
 re_send:
-	ret = send(fd, buf, strlen(buf), 0);
-	if (ret <= 0) {
+	if (send(fd, buf, strlen(buf), 0) <= 0) {
 		printf("send: %s\n", strerror(errno));
 		goto error;
 	}
 	printf("send '%s' to peer\n", buf);
 
 	memset(buf, 0, sizeof(buf));
-	ret = recv(fd, buf, sizeof(buf), 0);
-	switch (ret) {
+	switch (recv(fd, buf, sizeof(buf), 0)) {
 	case 0:
 		printf("recv: NO DATA\n");
 		break;
