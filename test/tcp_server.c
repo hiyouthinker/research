@@ -32,7 +32,7 @@ static void usage(char *cmd)
 }
 
 
-static int child_process_packets(int fd, int pid)
+static void child_process_packets(int fd, int pid)
 {
 	char rbuf[1024], sbuf[1024];
 
@@ -42,13 +42,11 @@ re_recv:
 	case 0:
 		printf("recv(0): %s, prepare to close fd and exit\n", strerror(errno));
 		close(fd);
-		exit(1);
 		break;
 	case -1:
 		printf("recv(-1): %s, prepare to close fd and exit\n", strerror(errno));
 		sleep(2);
 		close(fd);
-		exit(1);
 		break;
 	default:
 		printf("recv length: %s\n", rbuf);
@@ -60,10 +58,11 @@ re_recv:
 		} else if (*rbuf == 'q') {
 			printf("quit\n");
 			close(fd);
-			exit(0);
+			break;
 		}
 		goto re_recv;
-	}	
+	}
+	exit(0);
 }
 
 int main(int argc, char *argv[])
@@ -162,6 +161,7 @@ int main(int argc, char *argv[])
 			break;
 		case 0:/* child */
 			printf("I am child, pid: %d\n", getpid());
+			close(fd);
 			child_process_packets(accept_fd, parent_id);
 			break;
 		default:/* parent */
