@@ -20,6 +20,7 @@ static void usage(char *cmd)
 {
 	printf("usage: %s\n", cmd);
 	printf("\t-h\tshow this help\n");
+	printf("\t-c\tclose after connection directly\n");
 	printf("\t-d\tDST-IP\n");
 	printf("\t-D\tDST-PORT\n");
 	printf("\t-s\tSRC-IP\n");
@@ -30,14 +31,17 @@ static void usage(char *cmd)
 
 int main(int argc, char *argv[])
 {
-	int opt, fd = -1, len, pingpong = 0;
+	int opt, fd = -1, len, pingpong = 0, close_after_connect = 0;
 	char *sip = NULL, *dip = "127.0.0.1";
 	char buf[128];
 	struct sockaddr_in addr;
 	int sport = 0, dport = 80;
 
-	while ((opt = getopt(argc, argv, "d:D:s:S:ph")) != -1) {
+	while ((opt = getopt(argc, argv, "cd:D:s:S:ph")) != -1) {
 		switch (opt) {
+		case 'c':
+			close_after_connect = 1;
+			break;
 		case 'd':
 			dip = optarg;
 			break;
@@ -70,7 +74,7 @@ int main(int argc, char *argv[])
 	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0) {
 		perror("socket");
-		goto error;
+		goto done;
 	}
 
 	if (sip || sport) {
@@ -83,7 +87,7 @@ int main(int argc, char *argv[])
 
 		if (bind(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) < 0) {
 			perror("bind");
-			goto error;
+			goto done;
 		}
 	}
 
@@ -95,7 +99,6 @@ int main(int argc, char *argv[])
 	printf("Prepare to connect to %s:%d from %s:%d, and pingpong is %s\n"
 		, dip, dport, sip ?: "0.0.0.0", sport, pingpong ? "enable" : "disable");
 
-
 	if (pingpong) {
 		int quick_ack_off = 0;
 		if (setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, (void *)&quick_ack_off, sizeof(quick_ack_off)) < 0) {
@@ -105,15 +108,20 @@ int main(int argc, char *argv[])
 
 	if (connect(fd, (struct sockaddr *)&addr, len) < 0) {
 		perror("connect");
-		goto error;
+		goto done;
 	}
 	printf("connect successful\n");
+
+	if (close_after_connect) {
+		printf("close the socket\n");
+		goto done;
+	}
 
 	if (pingpong) {
 		sprintf(buf, "%s", "pingpong test from bigbro.");
 		if (send(fd, buf, strlen(buf), 0) <= 0) {
 			printf("send: %s\n", strerror(errno));
-			goto error;
+			goto done;
 		}
 	}
 
@@ -121,7 +129,7 @@ int main(int argc, char *argv[])
 re_send:
 	if (send(fd, buf, strlen(buf), 0) <= 0) {
 		printf("send: %s\n", strerror(errno));
-		goto error;
+		goto done;
 	}
 	printf("send '%s' to peer\n", buf);
 
@@ -132,7 +140,7 @@ re_send:
 		break;
 	case -1:
 		printf("recv: %s\n", strerror(errno));
-		goto error;
+		goto done;
 		break;
 	default:
 		printf("recv: %s\n", buf);
@@ -142,7 +150,7 @@ re_send:
 	printf("press input or press CTRL + C to quit\n");
 	scanf("%s", buf);
 	goto re_send;
-error:
+done:
 	if (fd >= 0)
 		close(fd);
 	return 0;
