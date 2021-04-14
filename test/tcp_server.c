@@ -24,6 +24,7 @@ static void usage(char *cmd)
 	printf("usage: %s\n", cmd);
 	printf("\t-h\tshow this help\n");
 	printf("\t-l\tLocal IP\n");
+	printf("\t-L\tenabel linger and set timeout\n");
 	printf("\t-p\tLocal Port\n");
 	printf("\t-r\tenable reuseaddr\n");
 	printf("\t-R\tenable reuseport\n");
@@ -72,11 +73,16 @@ int main(int argc, char *argv[])
 	struct sockaddr_in addr;
 	int reuseaddr = 0, reuseport = 0, accept_fd;
 	int keepalive_interval = 3, keepalive = 0, one = 1;
+	struct linger linger = {0, 0};
 
-	while ((opt = getopt(argc, argv, "l:p:rRk:h")) != -1) {
+	while ((opt = getopt(argc, argv, "l:L:p:rRk:h")) != -1) {
 		switch (opt) {
 		case 'l':
 			local_ip = optarg;
+			break;
+		case 'L':
+			linger.l_onoff = 1;
+			linger.l_linger = atoi(optarg);
 			break;
 		case 'p':
 			port = atoi(optarg);
@@ -113,6 +119,13 @@ int main(int argc, char *argv[])
 		perror("setsockopt for reuseport");
 		goto error;
 	}
+
+	if (linger.l_onoff && setsockopt(fd, SOL_SOCKET, SO_LINGER,
+			   (struct linger *) &linger, sizeof(struct linger))) {
+		perror("setsockopt for liner");
+		goto error;
+	}
+
 	if (keepalive) {
 		setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, (void *)&keepalive_interval, sizeof(keepalive_interval));
 		setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&keepalive_interval, sizeof(keepalive_interval));
