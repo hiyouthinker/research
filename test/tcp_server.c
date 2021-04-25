@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 #define SO_KEEPALIVE	9
 
@@ -19,19 +20,63 @@
 #define TCP_KEEPINTVL	5	/* Interval between keepalives */
 #define TCP_KEEPCNT		6	/* Number of keepalives before death */
 
+static int listener_fd = -1;
+static int pause_listener_ok = 0;
+
 static void usage(char *cmd)
 {
 	printf("usage: %s\n", cmd);
+	printf("\tSIGUSR1\tpause listener (based on reuseaddr)\n");
+	printf("\tSIGUSR2\tresume listener\n");
 	printf("\t-h\tshow this help\n");
-	printf("\t-l\tLocal IP\n");
+	printf("\t-l\tlocal IP\n");
 	printf("\t-L\tenabel linger and set timeout\n");
-	printf("\t-p\tLocal Port\n");
+	printf("\t-p\tlocal port\n");
 	printf("\t-r\tenable reuseaddr\n");
 	printf("\t-R\tenable reuseport\n");
 	printf("\t-k\tenable keepalive\n");
 	exit(0);
 }
 
+static int __pause_listener(int fd)
+{
+	if (shutdown(fd, SHUT_RDWR) != 0) {
+		printf("shutdown for SHUT_RDWR failed: %s\n", strerror(errno));
+		return -1;
+	}
+	pause_listener_ok = 1;
+	return 0;
+}
+
+static int __resume_listener(int fd)
+{
+	if (listen(fd, 5)) {
+		printf("listen failed: %s\n", strerror(errno));
+		return -1;
+	}
+	pause_listener_ok = 0;
+	return 0;
+}
+
+static void pause_listener(int sig)
+{
+	printf("receive signal to pause server, signal num: %d\n", sig);
+	if (listener_fd < 0) {
+		printf("invalid fd\n");
+		return;
+	}
+	__pause_listener(listener_fd);
+}
+
+static void resume_listener(int sig)
+{
+	printf("receive signal to resume server, signal num: %d\n", sig);
+	if (listener_fd < 0) {
+		printf("invalid fd\n");
+		return;
+	}
+	__resume_listener(listener_fd);
+}
 
 static void child_process_packets(int fd, int pid)
 {
@@ -105,6 +150,20 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	if (0) {
+		struct sigaction sa;
+
+		memset(&sa, 0, sizeof(struct sigaction));
+		sa.sa_handler = pause_listener;
+		sigaction(SIGUSR1, &sa, NULL);
+
+		sa.sa_handler = resume_listener;
+		sigaction(SIGUSR2, &sa, NULL);
+	} else {
+		signal(SIGUSR1, pause_listener);
+		signal(SIGUSR2, resume_listener);
+	}
+
 	fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0) {
 		perror("socket");
@@ -153,14 +212,23 @@ int main(int argc, char *argv[])
 		printf("listen: %s\n", strerror(errno));
 		goto error;
 	}
+	listener_fd = fd;
 
 	while (1) {
 		int pid, parent_id;
 
 		len = sizeof(struct sockaddr);
-		accept_fd = accept(fd, (struct sockaddr *)&addr, &len);
+		accept_fd = accept(fd, (struct sockaddr *)&addr, (socklen_t *)&len);
 		if (accept_fd < 0) {
-			printf("accept: %s\n", strerror(errno));
+			/*
+			 * errno is EINVAL if state of socket isn't TCP_LISTEN
+			 * errno is EINTR if signal pending
+			 */
+			if (pause_listener_ok && ((errno == EINVAL) || (errno == EINTR))) {
+				sleep(20);
+				continue;
+			}
+			printf("accept: %s (%d)\n", strerror(errno), errno);
 			goto error;
 		}
 		parent_id = getpid();
