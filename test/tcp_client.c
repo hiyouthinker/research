@@ -16,6 +16,10 @@
 
 #define TCP_QUICKACK		12	/* Block/reenable quick acks */
 
+#define TCP_KEEPIDLE	4	/* Start keeplives after this period */
+#define TCP_KEEPINTVL	5	/* Interval between keepalives */
+#define TCP_KEEPCNT		6	/* Number of keepalives before death */
+
 static void usage(char *cmd)
 {
 	printf("usage: %s\n", cmd);
@@ -26,18 +30,20 @@ static void usage(char *cmd)
 	printf("\t-s\tSRC-IP\n");
 	printf("\t-S\tSRC-PORT\n");
 	printf("\t-p\tenable pingpong\n");
+	printf("\t-k\tenable keepalive\n");
 	exit(0);
 }
 
 int main(int argc, char *argv[])
 {
 	int opt, fd = -1, len, pingpong = 0, close_after_connect = 0;
+	int keepalive_interval = 3, keepalive = 0;
 	char *sip = NULL, *dip = "127.0.0.1";
 	char buf[128];
 	struct sockaddr_in addr;
 	int sport = 0, dport = 80;
 
-	while ((opt = getopt(argc, argv, "cd:D:s:S:ph")) != -1) {
+	while ((opt = getopt(argc, argv, "cd:D:s:S:pk:h")) != -1) {
 		switch (opt) {
 		case 'c':
 			close_after_connect = 1;
@@ -61,10 +67,12 @@ int main(int argc, char *argv[])
 		case 'p':
 			pingpong = 1;
 			break;
-		case 'h':
-			usage(argv[0]);
+		case 'k':
+			keepalive = atoi(optarg);
 			break;
 		default:
+		case 'h':
+			usage(argv[0]);
 			break;
 		}
 	}
@@ -75,6 +83,12 @@ int main(int argc, char *argv[])
 	if (fd < 0) {
 		perror("socket");
 		goto done;
+	}
+
+	if (keepalive) {
+		setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, (void *)&keepalive_interval, sizeof(keepalive_interval));
+		setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&keepalive_interval, sizeof(keepalive_interval));
+		setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive, sizeof(keepalive));
 	}
 
 	if (sip || sport) {
@@ -110,6 +124,7 @@ int main(int argc, char *argv[])
 		perror("connect");
 		goto done;
 	}
+
 	printf("connect successful\n");
 
 	if (close_after_connect) {
