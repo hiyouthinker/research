@@ -40,7 +40,11 @@ static void usage(char *cmd)
 
 static int __pause_listener(int fd)
 {
-	if (shutdown(fd, SHUT_RDWR) != 0) {
+	/*
+	 * call tcp_disconnect in kernel
+	 * change the state from TCP_LISTEN to TCP_CLOSE
+	 */
+	if (shutdown(fd, SHUT_RD) != 0) {
 		printf("shutdown for SHUT_RDWR failed: %s\n", strerror(errno));
 		return -1;
 	}
