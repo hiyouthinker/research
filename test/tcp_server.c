@@ -102,9 +102,15 @@ re_recv:
 		printf("recv length: %s\n", rbuf);
 		sprintf(sbuf, "Hello! from %d\n", pid);
 		send(fd, sbuf, strlen(sbuf), 0);
-		if (!strcmp(rbuf, "qw")) {
+		if (!strcmp(rbuf, "swr")) {
 			printf("shutdown for writing\n");
 			shutdown(fd, SHUT_WR);
+		} else if (!strcmp(rbuf, "srd")) {
+			printf("shutdown for reading\n");
+			shutdown(fd, SHUT_RD);
+		} else if (!strcmp(rbuf, "srdwr")) {
+			printf("shutdown for reading & writing\n");
+			shutdown(fd, SHUT_RDWR);
 		} else if (*rbuf == 'q') {
 			printf("quit\n");
 			close(fd);
