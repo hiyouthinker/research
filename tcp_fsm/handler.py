@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 #coding=utf-8
 
 '''
@@ -46,10 +46,10 @@ def tcp_packet_handler(pkt):
 			value = tcp_state.sessions.get(key)
 			state = value[0]
 			if (state == tcp_state.TCP_FIN_WAIT):
-				print "session state: %s/%s" % (tcp_state.tcp_session_states[state], tcp_state.tcp_session_substates(value[4] & 0x0f)
-					, tcp_session_destroy_first_pkt_dir(value[4] & 0xf0))
+				print "current state of session: %s/%s (first %s)" % (tcp_state.tcp_session_states[state]
+					, tcp_state.tcp_session_substates[value[4] & 0x0f], tcp_state.tcp_session_destroy_first_pkt_dir[value[4] & 0xf0])
 			else :
-				print "session state: %s" % (tcp_state.tcp_session_states[state])
+				print "current state of session: %s" % (tcp_state.tcp_session_states[state])
 		# ACK
 		if (index == 6):
 			if (state == tcp_state.TCP_SYN_RECV):
@@ -72,7 +72,7 @@ def tcp_packet_handler(pkt):
 			value = (value[0], pkt[TCP].seq, pkt[TCP].ack, tcp_data_len)
 		# RST
 		elif (index == 4):
-			value = (TCP_RESET, pkt[TCP].seq, pkt[TCP].ack, 0, tcp_state.tcp_session_substate_closed | tcp_state.tcp_session_client_rst)
+			value = (TCP_RESET, pkt[TCP].seq, pkt[TCP].ack, 0, tcp_state.TCP_SESSION_SUBSTATE_CLOSED | tcp_state.tcp_session_client_rst)
 			tcp_state.sessions.update({key : value})
 			return
 		# FIN
@@ -81,9 +81,10 @@ def tcp_packet_handler(pkt):
 			tcp_hdr_len = pkt[TCP].dataofs * 4
 			tcp_data_len = ip_hdr_len - tcp_hdr_len
 			seq = pkt[TCP].ack
-			ack = pkt[TCP].seq + tcp_data_len
+			# SYN or FIN need eat one sequence number
+			ack = pkt[TCP].seq + tcp_data_len + 1
 			flags = tcp_state.tcp_flags_finack
-			value = (tcp_state.TCP_FIN_WAIT, pkt[TCP].seq, pkt[TCP].ack, tcp_data_len, tcp_state.tcp_session_substate_last_ack | tcp_state.tcp_session_client_fin)
+			value = (tcp_state.TCP_FIN_WAIT, pkt[TCP].seq, pkt[TCP].ack, tcp_data_len, tcp_state.TCP_SESSION_SUBSTATE_LAST_ACK | tcp_state.tcp_session_client_fin)
 		else :
 			print "Invalid Packet: %s/%d" % (tcp_state.tcp_pkt_flags[index], index)
 			return
