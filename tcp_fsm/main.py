@@ -9,6 +9,7 @@ from scapy.all import *
 import signal
 
 import utils
+import handler
 
 cap_port = 80
 cap_if = "eth1"
@@ -17,6 +18,6 @@ print "capture TCP packet of port %d on %s" % (cap_port, cap_if)
 signal.signal(signal.SIGTERM, utils.signal_handler)
 signal.signal(signal.SIGINT, utils.signal_handler)
 signal.signal(signal.SIGUSR1, utils.signal_handler)
-sniff(filter = filter, prn = utils.tcp_packet_handler, store = 0, iface = "eth1", count = 20)
+sniff(filter = filter, prn = handler.tcp_packet_handler, store = 0, iface = "eth1", count = 0)
 
-show_tcp_all_sessions()
+utils.show_tcp_all_sessions()
