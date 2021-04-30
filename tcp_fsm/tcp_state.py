@@ -20,7 +20,6 @@ TCP_SYN_SENT = 1
 TCP_SYN_RECV = 2
 TCP_ESTABLISHED = 3
 TCP_FIN_WAIT = 4
-TCP_RESET = 5
 
 # packet & direction
 tcp_session_client_rst = 0x10
@@ -52,7 +51,6 @@ tcp_session_states = {
 	TCP_SYN_RECV : "TCP_SYN_RECV",
 	TCP_ESTABLISHED : "TCP_ESTABLISHED",
 	TCP_FIN_WAIT : "TCP_FIN_WAIT",
-	TCP_RESET : "TCP_RESET",
 }
 
 tcp_session_substates = {

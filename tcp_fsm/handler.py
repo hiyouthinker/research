@@ -72,7 +72,7 @@ def tcp_packet_handler(pkt):
 			value = (value[0], pkt[TCP].seq, pkt[TCP].ack, tcp_data_len)
 		# RST
 		elif (index == 4):
-			value = (TCP_RESET, pkt[TCP].seq, pkt[TCP].ack, 0, tcp_state.TCP_SESSION_SUBSTATE_CLOSED | tcp_state.tcp_session_client_rst)
+			value = (tcp_state.TCP_FIN_WAIT, pkt[TCP].seq, pkt[TCP].ack, 0, tcp_state.TCP_SESSION_SUBSTATE_CLOSED | tcp_state.tcp_session_client_rst)
 			tcp_state.sessions.update({key : value})
 			return
 		# FIN
