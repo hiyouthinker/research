@@ -21,9 +21,16 @@
 
 static int cur_level = -1;
 
-static void usage(void)
+static void usage(char *cmd)
 {
-	printf("Nothing\n");
+	printf("usage: %s\n", cmd);
+	printf("\t-h\tshow this help\n");
+	printf("\t-c\tcalc pps\n");
+	printf("\t-p\tlocal port\n");
+	printf("\t-H\tlocal ip\n");
+	printf("\t-s\tshow some infos while received pkt\n");
+	printf("\t-d\tenable debug\n");
+	printf("\t-e\techo mode\n");
 	exit(0);
 }
 
@@ -36,12 +43,14 @@ static unsigned long netflow_pkts_total;
 static unsigned long netflow_pkts_old;
 static struct timeval stat_start_time;
 
-static int process_packets(int fd, int show)
+static int process_packets(int fd, int show, int echo)
 {
 	char recv_buf[1024 * 10];
 	int ret, nfds = fd + 1;
 	fd_set rfds;
 	struct timeval tv;
+	struct sockaddr_in from;
+	socklen_t addrlen = sizeof(struct sockaddr_in);
 
 re_recv:
 	FD_ZERO(&rfds);
@@ -68,8 +77,8 @@ re_recv:
 	}
 
 	memset(recv_buf, 0, sizeof(recv_buf));
-	ret = recv(fd, recv_buf, sizeof(recv_buf), 0);
-	if (ret < 0) {
+	ret = recvfrom(fd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&from, &addrlen);
+	if (ret <= 0) {
 		debug_print(0, "recv: %s, prepare to close fd and exit.\n", strerror(errno));
 		sleep(2);
 		close(fd);
@@ -81,8 +90,13 @@ re_recv:
 			fflush(NULL);
 		}
 		if (show > 1) {
-			printf("recv length: %d\n", ret);	
+			printf("recv length: %d\n", ret);
 			printf("\t%s\n", recv_buf);
+		}
+	}
+	if (echo) {
+		if (sendto(fd, recv_buf, ret, 0, (struct sockaddr*)&from, addrlen) < 0) {
+			debug_print(0, "send failed: %s.\n", strerror(errno));
 		}
 	}
 	goto re_recv;
@@ -121,27 +135,22 @@ int main(int argc, char *argv[])
 	int show = 0;
 	pthread_t thread;
 	struct timeval tv;
+	int pps_calc = 0, echo = 0;
 
 	gettimeofday(&tv, NULL);
 
 	stat_start_time = tv;
 	netflow_pkts_old = netflow_pkts_total = 0;
 
-	ret = pthread_create(&thread, NULL, calc_pps, NULL);
-	if (ret < 0) {
-		printf("pthread_create failed: %s\n", strerror(errno));
-		goto error;
-	}
-
-	while ((opt = getopt(argc, argv, "p:P:sH:dh")) != -1) {
+	while ((opt = getopt(argc, argv, "cp:sH:deh")) != -1) {
 		switch (opt) {
+		case 'c':
+			pps_calc = 1;
+			break;
 		case 'p':
 			port = atoi(optarg);
 			if (port <= 0)
 				port = 2055;
-			break;
-		case 'P':
-			port = atoi(optarg);
 			break;
 		case 's':
 			show++;
@@ -152,10 +161,21 @@ int main(int argc, char *argv[])
 		case 'd':
 			cur_level++;
 			break;
+		case 'e':
+			echo = 1;
+			break;
 		default:
 		case 'h':
-			usage();
+			usage(argv[0]);
 			break;
+		}
+	}
+
+	if (pps_calc) {
+		ret = pthread_create(&thread, NULL, calc_pps, NULL);
+		if (ret < 0) {
+			printf("pthread_create failed: %s\n", strerror(errno));
+			goto error;
 		}
 	}
 
@@ -178,7 +198,7 @@ int main(int argc, char *argv[])
 	}
 	printf("bind successful\n");
 
-	process_packets(fd, show);
+	process_packets(fd, show, echo);
 error:
 	if (fd >= 0)
 		close(fd);
