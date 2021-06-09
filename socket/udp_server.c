@@ -27,7 +27,7 @@ static void usage(char *cmd)
 	printf("\t-h\tshow this help\n");
 	printf("\t-c\tcalc pps\n");
 	printf("\t-p\tlocal port\n");
-	printf("\t-H\tlocal ip\n");
+	printf("\t-l\tlocal ip\n");
 	printf("\t-s\tshow some infos while received pkt\n");
 	printf("\t-d\tenable debug\n");
 	printf("\t-e\techo mode\n");
@@ -68,7 +68,7 @@ re_recv:
 		debug_print(0, "select failed(%s) and will exit\n", strerror(errno));
 		exit(1);
 	default:
-		debug_print(2, "ret of select: %d\n", ret);
+		debug_print(2, "readable socket num : %d\n", ret);
 		break;
 	}
 
@@ -85,16 +85,22 @@ re_recv:
 		exit(1);
 	} else {
 		netflow_pkts_total++;
-		if (show) {
-			printf(".");
-			fflush(NULL);
-		}
+
+		debug_print(1, "recv pkt (%d bytes) from %s:%d\n"
+			, ret, inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+
 		if (show > 1) {
 			printf("recv length: %d\n", ret);
 			printf("\t%s\n", recv_buf);
+		} else if (show) {
+			printf(".");
+			fflush(NULL);
 		}
 	}
 	if (echo) {
+		debug_print(1, "sent pkt (%d bytes) to %s:%d\n"
+			, ret, inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+
 		if (sendto(fd, recv_buf, ret, 0, (struct sockaddr*)&from, addrlen) < 0) {
 			debug_print(0, "send failed: %s.\n", strerror(errno));
 		}
@@ -142,7 +148,7 @@ int main(int argc, char *argv[])
 	stat_start_time = tv;
 	netflow_pkts_old = netflow_pkts_total = 0;
 
-	while ((opt = getopt(argc, argv, "cp:sH:deh")) != -1) {
+	while ((opt = getopt(argc, argv, "cp:sl:deh")) != -1) {
 		switch (opt) {
 		case 'c':
 			pps_calc = 1;
@@ -155,7 +161,7 @@ int main(int argc, char *argv[])
 		case 's':
 			show++;
 			break;
-		case 'H':
+		case 'l':
 			local_ip = optarg;
 			break;
 		case 'd':
@@ -188,7 +194,14 @@ int main(int argc, char *argv[])
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(port);
+#if 0
 	addr.sin_addr.s_addr = inet_addr(local_ip);
+#else
+	if (inet_aton(local_ip, &addr.sin_addr) == 0) {
+		perror("inet_aton");
+		goto error;
+	}
+#endif
 	len = sizeof(struct sockaddr_in);
 
 	printf("Prepare to bind to %s:%d for UDP socket\n", local_ip, port);
