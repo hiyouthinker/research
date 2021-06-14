@@ -18,6 +18,7 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include <stddef.h>		/* for offsetof */
 
 static int cur_level = -1;
 
@@ -43,13 +44,95 @@ static unsigned long netflow_pkts_total;
 static unsigned long netflow_pkts_old;
 static struct timeval stat_start_time;
 
-static int process_packets(int fd, int show, int echo)
+/* from busybox/libbb/udp_io.c */
+static ssize_t send_to_from(int fd, void *buf, size_t len, int flags,
+			const struct sockaddr_in *to, const struct sockaddr_in *from, socklen_t tolen)
+{
+	struct iovec iov[1];
+	struct msghdr msg;
+	union {
+		char cmsg[CMSG_SPACE(sizeof(struct in_pktinfo))];
+	} u;
+	struct cmsghdr* cmsgptr;
+	struct in_pktinfo *pktptr;
+
+	iov[0].iov_base = buf;
+	iov[0].iov_len = len;
+
+	memset(&u, 0, sizeof(u));
+
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_name = (void *)(struct sockaddr *)to;
+	msg.msg_namelen = tolen;
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = &u;
+	msg.msg_controllen = sizeof(u);
+	msg.msg_flags = flags;
+
+	cmsgptr = CMSG_FIRSTHDR(&msg);
+	cmsgptr->cmsg_level = IPPROTO_IP;
+	cmsgptr->cmsg_type = IP_PKTINFO;
+	cmsgptr->cmsg_len = CMSG_LEN(sizeof(struct in_pktinfo));
+	pktptr = (struct in_pktinfo *)(CMSG_DATA(cmsgptr));
+	pktptr->ipi_spec_dst = from->sin_addr;
+	msg.msg_controllen = cmsgptr->cmsg_len;
+	return sendmsg(fd, &msg, flags);
+}
+
+/* from busybox/libbb/udp_io.c */
+static ssize_t recv_from_to(int fd, void *buf, size_t len, int flags,
+		struct sockaddr_in *from, struct sockaddr_in *to, socklen_t sa_size)
+{
+	/* man recvmsg and man cmsg is needed to make sense of code below */
+	struct iovec iov[1];
+	union {
+		char cmsg[CMSG_SPACE(sizeof(struct in_pktinfo))];
+	} u;
+	struct cmsghdr *cmsgptr;
+	struct msghdr msg;
+	ssize_t recv_length;
+
+	iov[0].iov_base = buf;
+	iov[0].iov_len = len;
+
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_name = (struct sockaddr *)from;
+	msg.msg_namelen = sa_size;
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = &u;
+	msg.msg_controllen = sizeof(u);
+
+	recv_length = recvmsg(fd, &msg, flags);
+	if (recv_length < 0)
+		return recv_length;
+
+	/* Here we try to retrieve destination IP and memorize it */
+	for (cmsgptr = CMSG_FIRSTHDR(&msg);
+			cmsgptr != NULL;
+			cmsgptr = CMSG_NXTHDR(&msg, cmsgptr)
+	) {
+		if (cmsgptr->cmsg_level == IPPROTO_IP
+		 && cmsgptr->cmsg_type == IP_PKTINFO
+		) {
+			const int IPI_ADDR_OFF = offsetof(struct in_pktinfo, ipi_addr);
+			to->sin_family = AF_INET;
+			memcpy(&to->sin_addr, (char*)(CMSG_DATA(cmsgptr)) + IPI_ADDR_OFF, sizeof(to->sin_addr));
+			/* to->sin_port = 123; - this data is not supplied by kernel */
+			break;
+		}
+	}
+	return recv_length;
+}
+
+static int process_packets(int fd, int show, int echo, int port)
 {
 	char recv_buf[1024 * 10];
 	int ret, nfds = fd + 1;
 	fd_set rfds;
 	struct timeval tv;
-	struct sockaddr_in from;
+	struct sockaddr_in from = {}, to = {};
 	socklen_t addrlen = sizeof(struct sockaddr_in);
 
 re_recv:
@@ -77,7 +160,7 @@ re_recv:
 	}
 
 	memset(recv_buf, 0, sizeof(recv_buf));
-	ret = recvfrom(fd, recv_buf, sizeof(recv_buf), 0, (struct sockaddr *)&from, &addrlen);
+	ret = recv_from_to(fd, recv_buf, sizeof(recv_buf), 0, &from, &to, addrlen);
 	if (ret <= 0) {
 		debug_print(0, "recv: %s, prepare to close fd and exit.\n", strerror(errno));
 		sleep(2);
@@ -86,8 +169,9 @@ re_recv:
 	} else {
 		netflow_pkts_total++;
 
-		debug_print(1, "recv pkt (%d bytes) from %s:%d\n"
-			, ret, inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+		debug_print(1, "recv pkt (%d bytes) %s:%d => %s:%d\n", ret
+			, inet_ntoa(from.sin_addr), ntohs(from.sin_port)
+			, inet_ntoa(to.sin_addr), port);
 
 		if (show > 1) {
 			printf("recv length: %d\n", ret);
@@ -98,10 +182,11 @@ re_recv:
 		}
 	}
 	if (echo) {
-		debug_print(1, "sent pkt (%d bytes) to %s:%d\n"
-			, ret, inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+		debug_print(1, "sent pkt (%d bytes) %s:%d => %s:%d\n", ret
+			, inet_ntoa(to.sin_addr),  port
+			, inet_ntoa(from.sin_addr), ntohs(from.sin_port));
 
-		if (sendto(fd, recv_buf, ret, 0, (struct sockaddr*)&from, addrlen) < 0) {
+		if (send_to_from(fd, recv_buf, ret, 0, &from, &to, addrlen) < 0) {
 			debug_print(0, "send failed: %s.\n", strerror(errno));
 		}
 	}
@@ -135,7 +220,7 @@ static void *calc_pps(void *arg)
 
 int main(int argc, char *argv[])
 {
-	int opt, fd = -1, port = 2055, len, ret;
+	int opt, fd = -1, port = 2055, len, ret, on = 1;
 	char *local_ip = "0.0.0.0";
 	struct sockaddr_in addr;
 	int show = 0;
@@ -211,7 +296,12 @@ int main(int argc, char *argv[])
 	}
 	printf("bind successful\n");
 
-	process_packets(fd, show, echo);
+	if (setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &on, sizeof(on)) < 0) {
+		perror("setsockopt");
+		goto error;
+	}
+
+	process_packets(fd, show, echo, port);
 error:
 	if (fd >= 0)
 		close(fd);
