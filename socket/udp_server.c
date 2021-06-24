@@ -1,8 +1,9 @@
 /* 
  * UDP Server
  *		Author: BigBro
- *		Date:	2019.11.28/2020
+ *		Date:	2019.11.28/2020/2021
  */
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -19,6 +20,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <stddef.h>		/* for offsetof */
+#include <net/if.h>		/* for if_nametoindex */
 
 #define NIPQUAD(addr) \
 	((unsigned char *)&addr)[0], \
@@ -38,6 +40,7 @@ static void usage(char *cmd)
 	printf("\t-l\tlocal ip\n");
 	printf("\t-s\tshow some infos while received pkt\n");
 	printf("\t-d\tenable debug\n");
+	printf("\t-u\tbind dev to send pkt\n");
 	printf("\t-e\techo mode\n");
 	exit(0);
 }
@@ -234,13 +237,14 @@ int main(int argc, char *argv[])
 	pthread_t thread;
 	struct timeval tv;
 	int pps_calc = 0, echo = 0;
+	unsigned int ifindex = 0;
 
 	gettimeofday(&tv, NULL);
 
 	stat_start_time = tv;
 	netflow_pkts_old = netflow_pkts_total = 0;
 
-	while ((opt = getopt(argc, argv, "cp:sl:deh")) != -1) {
+	while ((opt = getopt(argc, argv, "cp:sl:deu:h")) != -1) {
 		switch (opt) {
 		case 'c':
 			pps_calc = 1;
@@ -261,6 +265,15 @@ int main(int argc, char *argv[])
 			break;
 		case 'e':
 			echo = 1;
+			break;
+		case 'u':
+			ifindex = if_nametoindex(optarg);
+			if (ifindex <= 0) {
+				printf("invalid interface: %s\n", optarg);
+				usage(argv[0]);
+			} else {
+				ifindex = htonl(ifindex);
+			}
 			break;
 		default:
 		case 'h':
@@ -304,8 +317,15 @@ int main(int argc, char *argv[])
 	printf("bind successful\n");
 
 	if (setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &on, sizeof(on)) < 0) {
-		perror("setsockopt");
+		perror("setsockopt for IP_PKTINFO");
 		goto error;
+	}
+
+	if (ifindex > 0) {
+		if (setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF, &ifindex, sizeof(ifindex)) < 0) {
+			perror("setsockopt for IP_UNICAST_IF");
+			goto error;
+		}
 	}
 
 	process_packets(fd, show, echo, port);
