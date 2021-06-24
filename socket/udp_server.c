@@ -20,6 +20,13 @@
 #include <sys/time.h>
 #include <stddef.h>		/* for offsetof */
 
+#define NIPQUAD(addr) \
+	((unsigned char *)&addr)[0], \
+	((unsigned char *)&addr)[1], \
+	((unsigned char *)&addr)[2], \
+	((unsigned char *)&addr)[3]
+#define NIPQUAD_FMT "%u.%u.%u.%u"
+
 static int cur_level = -1;
 
 static void usage(char *cmd)
@@ -169,9 +176,9 @@ re_recv:
 	} else {
 		netflow_pkts_total++;
 
-		debug_print(1, "recv pkt (%d bytes) %s:%d => %s:%d\n", ret
-			, inet_ntoa(from.sin_addr), ntohs(from.sin_port)
-			, inet_ntoa(to.sin_addr), port);
+		debug_print(1, "recv pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n", ret
+			, NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port)
+			, NIPQUAD(to.sin_addr), port);
 
 		if (show > 1) {
 			printf("recv length: %d\n", ret);
@@ -182,9 +189,9 @@ re_recv:
 		}
 	}
 	if (echo) {
-		debug_print(1, "sent pkt (%d bytes) %s:%d => %s:%d\n", ret
-			, inet_ntoa(to.sin_addr),  port
-			, inet_ntoa(from.sin_addr), ntohs(from.sin_port));
+		debug_print(1, "sent pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n", ret
+			, NIPQUAD(to.sin_addr.s_addr),  port
+			, NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port));
 
 		if (send_to_from(fd, recv_buf, ret, 0, &from, &to, addrlen) < 0) {
 			debug_print(0, "send failed: %s.\n", strerror(errno));
