@@ -35,7 +35,8 @@ static void usage(char *cmd)
 {
 	printf("usage: %s\n", cmd);
 	printf("\t-h\tshow this help\n");
-	printf("\t-c\tcalc pps\n");
+	printf("\t-c\tcalculate pps\n");
+	printf("\t-i\tpps interval\n");
 	printf("\t-p\tlocal port\n");
 	printf("\t-l\tlocal ip\n");
 	printf("\t-s\tshow some infos while received pkt\n");
@@ -208,11 +209,15 @@ static void *calc_pps(void *arg)
 {
 	struct timeval curr_time, start_time;
 	unsigned long pkts_old, pkts_curr, pps;
+	int interval = 5;
 
 	printf("Entering calc_pps\n");
 
+	if (arg && (*(int *)arg > 0))
+		interval = *(unsigned int *)arg;
+
 	while (1) {
-		sleep(5);
+		sleep(interval);
 
 	 	gettimeofday(&curr_time, NULL);
 		start_time = stat_start_time;
@@ -222,8 +227,8 @@ static void *calc_pps(void *arg)
 		netflow_pkts_old = pkts_curr;
 
 		pps = ((pkts_curr - pkts_old) * 1000000)/TIME_INTERVAL(curr_time, start_time);
-		printf("pps: %lu, diff of pkts: %lu, interval: %lu\n"
-			, pps, (pkts_curr - pkts_old) * 1000000, TIME_INTERVAL(curr_time, start_time));
+		printf("pps: %lu, curr pkts: %lu, last pkts: %lu, interval: %lu\n"
+			, pps, pkts_curr, pkts_old, TIME_INTERVAL(curr_time, start_time));
 	}
 	return arg;
 }
@@ -238,13 +243,14 @@ int main(int argc, char *argv[])
 	struct timeval tv;
 	int pps_calc = 0, echo = 0;
 	unsigned int ifindex = 0;
+	int interval = -1;
 
 	gettimeofday(&tv, NULL);
 
 	stat_start_time = tv;
 	netflow_pkts_old = netflow_pkts_total = 0;
 
-	while ((opt = getopt(argc, argv, "cp:sl:deu:h")) != -1) {
+	while ((opt = getopt(argc, argv, "cp:sl:deu:i:h")) != -1) {
 		switch (opt) {
 		case 'c':
 			pps_calc = 1;
@@ -275,6 +281,13 @@ int main(int argc, char *argv[])
 				ifindex = htonl(ifindex);
 			}
 			break;
+		case 'i':
+			interval = atoi(optarg);
+			if (interval <= 0) {
+				printf("invalid interval: %s\n", optarg);
+				usage(argv[0]);
+			}
+			break;
 		default:
 		case 'h':
 			usage(argv[0]);
@@ -283,7 +296,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (pps_calc) {
-		ret = pthread_create(&thread, NULL, calc_pps, NULL);
+		ret = pthread_create(&thread, NULL, calc_pps, (void *)&interval);
 		if (ret < 0) {
 			printf("pthread_create failed: %s\n", strerror(errno));
 			goto error;
