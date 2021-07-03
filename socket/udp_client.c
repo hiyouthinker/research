@@ -56,7 +56,7 @@ static void help(char *cmd)
 static void stats_output(void)
 {
 	printf("Statistics:\n");
-	printf("\txmited pkt  :		%u\n", my_stats.xmitted_pkts);
+	printf("\txmitted pkt :		%u\n", my_stats.xmitted_pkts);
 	printf("\treceived pkt:		%u\n", my_stats.received_pkts);
 }
 
