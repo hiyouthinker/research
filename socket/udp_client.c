@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <time.h>
 
 static int debug_level = -1;
 
@@ -75,6 +76,7 @@ int main (int argc, char **argv)
 	struct sockaddr_in remote_si = {
 		.sin_family = AF_INET,
 	};
+	time_t old = time(NULL);
 
 	while ((opt = getopt(argc, argv, "p:r:P:l:c:s:ei:dh")) != -1) {
 		int tmp;
@@ -163,6 +165,8 @@ int main (int argc, char **argv)
 		goto done;
 	}
 
+	printf("Prepare to send packet to %s:%u\n", inet_ntoa(remote_si.sin_addr), ntohs(remote_si.sin_port));
+
 	while (count-- > 0) {
 		char buf[2048] = "Hello, I'am BigBro";
 		int xmitted, received;
@@ -189,6 +193,10 @@ int main (int argc, char **argv)
 			goto done;
 		}
 		my_stats.received_pkts++;
+		if (time(NULL) - old >= 5) {
+			stats_output();
+			old = time(NULL);
+		}
 		if (interval)
 			usleep(1000 * interval);
 	}
