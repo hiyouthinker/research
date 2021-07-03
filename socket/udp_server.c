@@ -33,7 +33,7 @@ static int cur_level = -1;
 
 static void usage(char *cmd)
 {
-	printf("usage: %s\n", cmd);
+	printf("%s usage:\n", cmd);
 	printf("\t-h\tshow this help\n");
 	printf("\t-c\tcalculate pps\n");
 	printf("\t-i\tpps interval\n");
@@ -227,17 +227,18 @@ static void *calc_pps(void *arg)
 		netflow_pkts_old = pkts_curr;
 
 		pps = ((pkts_curr - pkts_old) * 1000000)/TIME_INTERVAL(curr_time, start_time);
-		printf("pps: %lu, curr pkts: %lu, last pkts: %lu, interval: %lu\n"
-			, pps, pkts_curr, pkts_old, TIME_INTERVAL(curr_time, start_time));
+		printf("pps: %5lu, pkts: %7lu, interval: %lu us\n"
+			, pps, pkts_curr, TIME_INTERVAL(curr_time, start_time));
 	}
 	return arg;
 }
 
 int main(int argc, char *argv[])
 {
-	int opt, fd = -1, port = 2055, len, ret, on = 1;
-	char *local_ip = "0.0.0.0";
-	struct sockaddr_in addr;
+	int opt, fd = -1, len, ret, on = 1;
+	struct sockaddr_in addr = {
+		.sin_family = AF_INET,
+	};
 	int show = 0;
 	pthread_t thread;
 	struct timeval tv;
@@ -251,20 +252,28 @@ int main(int argc, char *argv[])
 	netflow_pkts_old = netflow_pkts_total = 0;
 
 	while ((opt = getopt(argc, argv, "cp:sl:deu:i:h")) != -1) {
+		int tmp;
+
 		switch (opt) {
 		case 'c':
 			pps_calc = 1;
 			break;
 		case 'p':
-			port = atoi(optarg);
-			if (port <= 0)
-				port = 2055;
+			tmp = atoi(optarg);
+			if (tmp <= 0 || tmp > 65535) {
+				printf("invalid param: %s\n", optarg);
+				usage(argv[0]);
+			}
+			addr.sin_port = ntohs(tmp);
 			break;
 		case 's':
 			show++;
 			break;
 		case 'l':
-			local_ip = optarg;
+			if (inet_aton(optarg, &addr.sin_addr) == 0) {
+				printf("invalid param: %s\n", optarg);
+				usage(argv[0]);
+			}
 			break;
 		case 'd':
 			cur_level++;
@@ -309,20 +318,9 @@ int main(int argc, char *argv[])
 		goto error;
 	}
 
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(port);
-#if 0
-	addr.sin_addr.s_addr = inet_addr(local_ip);
-#else
-	if (inet_aton(local_ip, &addr.sin_addr) == 0) {
-		perror("inet_aton");
-		goto error;
-	}
-#endif
 	len = sizeof(struct sockaddr_in);
 
-	printf("Prepare to bind to %s:%d for UDP socket\n", local_ip, port);
+	printf("Prepare to bind to %s:%d for UDP socket\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
 	if (bind(fd, (struct sockaddr *)&addr, len) < 0) {
 		perror("bind");
 		goto error;
@@ -341,7 +339,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	process_packets(fd, show, echo, port);
+	process_packets(fd, show, echo, ntohs(addr.sin_port));
 error:
 	if (fd >= 0)
 		close(fd);
