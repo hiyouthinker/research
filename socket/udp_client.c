@@ -39,6 +39,7 @@ struct stats_s {
 
 static void help(char *cmd)
 {
+	printf("(version: 1.0/BigBro)\n\n");
 	printf("%s usage:\n", cmd);
 	printf("\t-h\tshow this help\n");
 	printf("\t-p\tdest port\n");

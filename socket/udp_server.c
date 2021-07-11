@@ -33,6 +33,7 @@ static int cur_level = -1;
 
 static void usage(char *cmd)
 {
+	printf("(version: 1.0/BigBro)\n\n");
 	printf("%s usage:\n", cmd);
 	printf("\t-h\tshow this help\n");
 	printf("\t-c\tcalculate pps\n");
