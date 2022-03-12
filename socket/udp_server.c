@@ -1,7 +1,7 @@
 /* 
  * UDP Server
  *		Author: BigBro
- *		Date:	2019.11.28/2020/2021
+ *		Date:	2019/2020/2021/2022
  */
 
 #include <stdio.h>
@@ -22,6 +22,10 @@
 #include <stddef.h>		/* for offsetof */
 #include <net/if.h>		/* for if_nametoindex */
 
+#define PRINT_EMERG			0
+#define PRINT_NOTICE		1
+#define PRINT_DEBUG			2
+
 #define NIPQUAD(addr) \
 	((unsigned char *)&addr)[0], \
 	((unsigned char *)&addr)[1], \
@@ -29,7 +33,8 @@
 	((unsigned char *)&addr)[3]
 #define NIPQUAD_FMT "%u.%u.%u.%u"
 
-static int cur_level = -1;
+static int cur_level = PRINT_EMERG;
+static int sleep_util_usr1_sig = 0;
 
 static void usage(char *cmd)
 {
@@ -44,6 +49,8 @@ static void usage(char *cmd)
 	printf("\t-d\tenable debug\n");
 	printf("\t-u\tbind dev to send pkt\n");
 	printf("\t-e\techo mode\n");
+	printf("\t-R\trecv buffer size\n");
+	printf("\t-S\tsleep until the SIGUSR1 signal is received\n");
 	exit(0);
 }
 
@@ -157,33 +164,34 @@ re_recv:
 	ret = select(nfds, &rfds, NULL, NULL, &tv);
 	switch (ret) {
 	case 0:
-		debug_print(2, "Timeout\n");
+		debug_print(PRINT_DEBUG, "Timeout\n");
 		goto re_recv;
 	case -1:
-		debug_print(0, "select failed(%s) and will exit\n", strerror(errno));
+		debug_print(PRINT_EMERG, "select failed(%s) and will exit\n", strerror(errno));
 		exit(1);
 	default:
-		debug_print(2, "readable socket num : %d\n", ret);
+		debug_print(PRINT_DEBUG, "readable socket num : %d\n", ret);
 		break;
 	}
 
 	if (FD_ISSET(fd, &rfds)) {
-		debug_print(2, "fd %d is readable\n", fd);
+		debug_print(PRINT_DEBUG, "fd %d is readable\n", fd);
 	}
 
 	memset(recv_buf, 0, sizeof(recv_buf));
 	ret = recv_from_to(fd, recv_buf, sizeof(recv_buf), 0, &from, &to, addrlen);
 	if (ret <= 0) {
-		debug_print(0, "recv: %s, prepare to close fd and exit.\n", strerror(errno));
+		debug_print(PRINT_EMERG, "recv: %s, prepare to close fd and exit.\n", strerror(errno));
 		sleep(2);
 		close(fd);
 		exit(1);
 	} else {
 		netflow_pkts_total++;
 
-		debug_print(1, "recv pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n", ret
+		debug_print(PRINT_NOTICE, "recv pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n", ret
 			, NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port)
 			, NIPQUAD(to.sin_addr), port);
+		debug_print(PRINT_DEBUG, "content: [%s]\n", recv_buf);
 
 		if (show > 1) {
 			printf("recv length: %d\n", ret);
@@ -193,13 +201,18 @@ re_recv:
 			fflush(NULL);
 		}
 	}
+
 	if (echo) {
-		debug_print(1, "sent pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n", ret
+		debug_print(PRINT_NOTICE, "sent pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n", ret
 			, NIPQUAD(to.sin_addr.s_addr),  port
 			, NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port));
 
+		/* avoid fragmenting packets */
+		if (ret > 1000)
+			ret = 1000;
+
 		if (send_to_from(fd, recv_buf, ret, 0, &from, &to, addrlen) < 0) {
-			debug_print(0, "send failed: %s.\n", strerror(errno));
+			debug_print(PRINT_EMERG, "send failed: %s.\n", strerror(errno));
 		}
 	}
 	goto re_recv;
@@ -234,6 +247,11 @@ static void *calc_pps(void *arg)
 	return arg;
 }
 
+static void sig_handler(int signo)
+{
+	sleep_util_usr1_sig = 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int opt, fd = -1, len, ret, on = 1;
@@ -245,14 +263,14 @@ int main(int argc, char *argv[])
 	struct timeval tv;
 	int pps_calc = 0, echo = 0;
 	unsigned int ifindex = 0;
-	int interval = -1;
+	int interval = -1, recv_buf_len = 0;
 
 	gettimeofday(&tv, NULL);
 
 	stat_start_time = tv;
 	netflow_pkts_old = netflow_pkts_total = 0;
 
-	while ((opt = getopt(argc, argv, "cp:sl:deu:i:h")) != -1) {
+	while ((opt = getopt(argc, argv, "cp:sl:deu:i:R:Sh")) != -1) {
 		int tmp;
 
 		switch (opt) {
@@ -298,6 +316,16 @@ int main(int argc, char *argv[])
 				usage(argv[0]);
 			}
 			break;
+		case 'R':
+			recv_buf_len = atoi(optarg);
+			if (recv_buf_len <= 0) {
+				printf("invalid buffer size: %s\n", optarg);
+				usage(argv[0]);
+			}
+			break;
+		case 'S':
+			sleep_util_usr1_sig = 1;
+			break;
 		default:
 		case 'h':
 			usage(argv[0]);
@@ -311,6 +339,11 @@ int main(int argc, char *argv[])
 			printf("pthread_create failed: %s\n", strerror(errno));
 			goto error;
 		}
+	}
+
+	if (signal(SIGUSR1, sig_handler)) {
+		perror("signal");
+		goto error;
 	}
 
 	fd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -338,6 +371,34 @@ int main(int argc, char *argv[])
 			perror("setsockopt for IP_UNICAST_IF");
 			goto error;
 		}
+	}
+
+	if (recv_buf_len) {
+		int val, old, size = sizeof(val);
+
+		if (getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &val, &size) < 0) {
+			perror("getsockopt for SO_RCVBUF");
+			goto error;
+		}
+
+		if (setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &recv_buf_len, sizeof(recv_buf_len)) < 0) {
+			perror("setsockopt for SO_RCVBUF");
+			goto error;
+		}
+
+		old = val;
+
+		if (getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &val, &size) < 0) {
+			perror("getsockopt for SO_RCVBUF");
+			goto error;
+		}
+
+		debug_print(PRINT_NOTICE, "UDP recvbuf: %d -> %d (expected: %d)\n", old, val, recv_buf_len);
+	}
+
+	while (sleep_util_usr1_sig) {
+		debug_print(PRINT_DEBUG, "prepare to sleep for 5 seconds\n");
+		sleep(5);
 	}
 
 	process_packets(fd, show, echo, ntohs(addr.sin_port));

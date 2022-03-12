@@ -1,7 +1,7 @@
 /* 
  * UDP Client (RX/TX UDP Packet)
  *		Author: BigBro
- *		Date:	2021
+ *		Date:	2021/2022
  */
 
 #include <stdio.h>
@@ -18,7 +18,11 @@
 #include <arpa/inet.h>
 #include <time.h>
 
-static int debug_level = -1;
+#define PRINT_EMERG			0
+#define PRINT_NOTICE		1
+#define PRINT_DEBUG			2
+
+static int debug_level = PRINT_EMERG;
 
 #define debug_print(my_level, x...)	do {\
 		if (debug_level >= my_level)\
@@ -51,6 +55,7 @@ static void help(char *cmd)
 	printf("\t-e\techo mode\n");
 	printf("\t-i\tinterval to xmit\n");
 	printf("\t-d\tenable debug\n");
+	printf("\t-S\tsend buffer size\n");
 	exit(0);
 }
 
@@ -70,7 +75,7 @@ static void sig_handler(int signo)
 int main (int argc, char **argv)
 {
 	int opt, count = 1, fd;
-	int flags = 0, echo = 0, interval = 0, size = 10;
+	int flags = 0, echo = 0, interval = 0, size = 10, send_buf_len = 0;
 	struct sockaddr_in local_si = {
 		.sin_family = AF_INET,
 	};
@@ -79,7 +84,7 @@ int main (int argc, char **argv)
 	};
 	time_t old = time(NULL);
 
-	while ((opt = getopt(argc, argv, "p:r:P:l:c:s:ei:dh")) != -1) {
+	while ((opt = getopt(argc, argv, "p:r:P:l:c:s:ei:dS:h")) != -1) {
 		int tmp;
 
 		switch (opt) {
@@ -124,6 +129,7 @@ int main (int argc, char **argv)
 				printf("invalid param: %s\n", optarg);
 				help(argv[0]);
 			}
+			break;
 		case 'e':
 			echo = 1;
 			break;
@@ -136,6 +142,13 @@ int main (int argc, char **argv)
 			break;
 		case 'd':
 			debug_level++;
+			break;
+		case 'S':
+			send_buf_len = atoi(optarg);
+			if (send_buf_len <= 0) {
+				printf("invalid buffer size: %s\n", optarg);
+				help(argv[0]);
+			}
 			break;
 		case 'h':
 		default:
@@ -161,6 +174,29 @@ int main (int argc, char **argv)
 		}
 	}
 
+	if (send_buf_len) {
+		int val, old, len = sizeof(val);
+
+		if (getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &val, &len) < 0) {
+			perror("getsockopt for SO_SNDBUF");
+			goto done;
+		}
+
+		if (setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &send_buf_len, sizeof(send_buf_len)) < 0) {
+			perror("setsockopt for SO_SNDBUF");
+			goto done;
+		}
+
+		old = val;
+
+		if (getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &val, &len) < 0) {
+			perror("getsockopt for SO_SNDBUF");
+			goto done;
+		}
+
+		debug_print(PRINT_NOTICE, "UDP sendbuf: %d -> %d (expected: %d)\n", old, val, send_buf_len);
+	}
+
 	if (signal(SIGINT, sig_handler) || signal(SIGTERM, sig_handler)) {
 		perror("signal");
 		goto done;
@@ -169,8 +205,11 @@ int main (int argc, char **argv)
 	printf("Prepare to send packet to %s:%u\n", inet_ntoa(remote_si.sin_addr), ntohs(remote_si.sin_port));
 
 	while (count-- > 0) {
-		char buf[2048] = "Hello, I'am BigBro";
+		char buf[2048];
 		int xmitted, received;
+		static int i;
+
+		sprintf(buf, "Hello, I'am BigBro - %d", i++);
 
 		my_stats.xmitted_pkts++;
 		xmitted = sendto(fd, buf, size, 0, (struct sockaddr*)&remote_si, sizeof(remote_si));
@@ -181,7 +220,9 @@ int main (int argc, char **argv)
 				printf("xmitted (%d) != expected (%d)\n", xmitted, size);
 			goto done;
 		}
-		
+
+		debug_print(PRINT_DEBUG, "send %d bytes udp data to server\n", xmitted);
+
 		if (!echo)
 			continue;
 
@@ -201,6 +242,7 @@ int main (int argc, char **argv)
 		if (interval)
 			usleep(1000 * interval);
 	}
+
 	stats_output();
 done:
 	if(fd >= 0){
