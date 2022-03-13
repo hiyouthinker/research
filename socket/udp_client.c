@@ -83,8 +83,9 @@ int main (int argc, char **argv)
 		.sin_family = AF_INET,
 	};
 	time_t old = time(NULL);
+	int non_block = 0;
 
-	while ((opt = getopt(argc, argv, "p:r:P:l:c:s:ei:dS:h")) != -1) {
+	while ((opt = getopt(argc, argv, "p:r:P:l:c:s:ei:dS:nh")) != -1) {
 		int tmp;
 
 		switch (opt) {
@@ -150,6 +151,9 @@ int main (int argc, char **argv)
 				help(argv[0]);
 			}
 			break;
+		case 'n':
+			non_block = 1;
+			break;
 		case 'h':
 		default:
 			help(argv[0]);
@@ -202,6 +206,14 @@ int main (int argc, char **argv)
 		goto done;
 	}
 
+	if (non_block) {
+		if (fcntl (fd, F_SETFL, O_NONBLOCK) < 0) {
+			perror("fcntl for O_NONBLOCK");
+			goto done;
+		}
+		debug_print(PRINT_NOTICE, "set udp socket to non-block mode\n");
+	}
+
 	printf("Prepare to send packet to %s:%u\n", inet_ntoa(remote_si.sin_addr), ntohs(remote_si.sin_port));
 
 	while (count-- > 0) {
@@ -215,13 +227,13 @@ int main (int argc, char **argv)
 		xmitted = sendto(fd, buf, size, 0, (struct sockaddr*)&remote_si, sizeof(remote_si));
 		if (xmitted != size) {
 			if (xmitted < 0)
-				perror("sendto");
+				printf("failed to exec sendto: %s @%d\n", strerror(errno), errno);
 			else
 				printf("xmitted (%d) != expected (%d)\n", xmitted, size);
 			goto done;
 		}
 
-		debug_print(PRINT_DEBUG, "send %d bytes udp data to server\n", xmitted);
+		debug_print(PRINT_DEBUG, "send %d bytes udp data to server @%ld\n", xmitted, time(NULL));
 
 		if (!echo)
 			continue;
