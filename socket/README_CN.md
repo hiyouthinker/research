@@ -1,12 +1,12 @@
 # 1 udp 测试
 ## 1.1 udp 发包时是否会发生阻塞
 ### 1.1.1 环境
-```
+```c
 /* 内核版本 */
 root@young-VirtualBox:socket# uname -a
 Linux young-VirtualBox 4.15.0-171-generic #180-Ubuntu SMP Wed Mar 2 17:25:05 UTC 2022 x86_64 x86_64 x86_64 GNU/Linux
 ```
-```
+```c
 /*
  * ARP 队列可容纳的报文个数及字节数
  */
@@ -15,7 +15,7 @@ root@young-VirtualBox:socket# cat /proc/sys/net/ipv4/neigh/enp0s8/unres_qlen
 root@young-VirtualBox:socket# cat /proc/sys/net/ipv4/neigh/enp0s8/unres_qlen_bytes 
 212992
 ```
-```
+```c
 /*
  * 路由表
  */
@@ -28,7 +28,7 @@ default via 10.0.2.2 dev enp0s3 proto dhcp metric 20100
 root@young-VirtualBox:socket#
 ```
 ### 1.1.2 测试
-```
+```c
 /*
  * 将 socket 队列阈值 (sk->sk_sndbuf) 设置为较小值 1000 (小于 arp 队列阈值)
  * 给不存在的 IP 发送 udp 报文
@@ -58,7 +58,7 @@ send 1000 bytes udp data to server @1647180181
 环境同上
 ```
 ### 1.2.2 测试
-```
+```c
 /*
  * 比上面的测试多了个 -n 参数 (-n 表示为非阻塞模式)
  * 可以看到返回了错误11，即 EAGAIN
@@ -74,7 +74,7 @@ failed to exec sendto: Resource temporarily unavailable @11
 ```
 ## 1.3 相关代码
 ### 1.3.1 arp 队列
-```
+```c
 /*
  * 当队列中报文字节数大于阈值时，则会将老的 skb 释放
  /
@@ -99,8 +99,8 @@ __neigh_event_send			in net/core/neighbour.c
 		rc = 1;
 	}
 ```
-### 1.3.2 
-```
+### 1.3.2 udp 发包
+```c
 udp_sendmsg
 	-> ip_make_skb
 		-> err = __ip_append_data()
@@ -145,8 +145,8 @@ sock_alloc_send_pskb
 		skb_set_owner_w(skb, sk);
 	-> return skb;
 ```
-### 1.3.3
-```
+### 1.3.3 skb 释放
+```c
 /*
  * 释放 skb 时，相应的计数也要减少
  */
