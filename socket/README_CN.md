@@ -74,11 +74,15 @@ failed to exec sendto: Resource temporarily unavailable @11
 ```
 ## 1.3 相关代码
 ### 1.3.1 arp 队列
-```c
+```go
 /*
  * 当队列中报文字节数大于阈值时，则会将老的 skb 释放
- /
-__neigh_event_send			in net/core/neighbour.c
+ */
+neigh_resolve_output   in net/core/neighbour.c
+	-> neigh_event_send
+		-> __neigh_event_send
+
+__neigh_event_send
 	if (neigh->nud_state == NUD_INCOMPLETE) {
 		if (skb) {
 			while (neigh->arp_queue_len_bytes + skb->truesize >
@@ -113,7 +117,7 @@ udp_sendmsg
 
 		-> return __ip_make_skb()
 ```
-```
+```c
 sock_alloc_send_pskb
 	-> timeo = sock_sndtimeo(sk, noblock)
 	-> for (;;) {
@@ -144,6 +148,12 @@ sock_alloc_send_pskb
 	-> if (skb)
 		skb_set_owner_w(skb, sk);
 	-> return skb;
+```
+```c
+skb_set_owner_w
+	-> skb_orphan(skb)
+	-> skb->destructor = sock_wfree
+	-> refcount_add(skb->truesize, &sk->sk_wmem_alloc)
 ```
 ### 1.3.3 skb 释放
 ```c
