@@ -39,7 +39,9 @@ int main(int argc, char *argv[])
 {
 	int opt, fd = -1, len;
 	int ret, name = 0;
-	struct sockaddr_un addr;
+	struct sockaddr_un addr = {
+		.sun_family = AF_UNIX,
+	};
 	char *file = NULL;
 	char *words = "hello!";
 	char buf[128];
@@ -70,8 +72,6 @@ int main(int argc, char *argv[])
 		goto error;
 	}
 
-	memset(&addr, 0, sizeof(addr));
-
 	if (!name) {
 		if (!file) {
 			printf("please input FILE PATH\n");
@@ -85,7 +85,6 @@ int main(int argc, char *argv[])
 	} else {
 		printf("Prepare to connect peer by abstract socket\n");
 
-		addr.sun_family = AF_UNIX;
 		if (file) {
 			sprintf(addr.sun_path + 1, "%s", file);
 			len = sizeof(sa_family_t) + strlen(addr.sun_path + 1) + 1;
