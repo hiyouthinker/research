@@ -18,16 +18,7 @@
 #include <arpa/inet.h>
 #include <time.h>
 
-#define PRINT_EMERG			0
-#define PRINT_NOTICE		1
-#define PRINT_DEBUG			2
-
-static int debug_level = PRINT_EMERG;
-
-#define debug_print(my_level, x...)	do {\
-		if (debug_level >= my_level)\
-			printf(x);\
-	} while(0)
+#include "common.h"
 
 enum {
 	F_LOCAL_IP = 1,

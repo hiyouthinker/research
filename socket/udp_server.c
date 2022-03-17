@@ -22,18 +22,8 @@
 #include <stddef.h>		/* for offsetof */
 #include <net/if.h>		/* for if_nametoindex */
 
-#define PRINT_EMERG			0
-#define PRINT_NOTICE		1
-#define PRINT_DEBUG			2
+#include "common.h"
 
-#define NIPQUAD(addr) \
-	((unsigned char *)&addr)[0], \
-	((unsigned char *)&addr)[1], \
-	((unsigned char *)&addr)[2], \
-	((unsigned char *)&addr)[3]
-#define NIPQUAD_FMT "%u.%u.%u.%u"
-
-static int cur_level = PRINT_EMERG;
 static int sleep_util_usr1_sig = 0;
 
 static void usage(char *cmd)
@@ -53,11 +43,6 @@ static void usage(char *cmd)
 	printf("\t-S\tsleep until the SIGUSR1 signal is received\n");
 	exit(0);
 }
-
-#define debug_print(my_level, x...)	do {\
-		if (cur_level >= my_level)\
-			printf(x);\
-	} while(0)
 
 static unsigned long netflow_pkts_total;
 static unsigned long netflow_pkts_old;
@@ -295,7 +280,7 @@ int main(int argc, char *argv[])
 			}
 			break;
 		case 'd':
-			cur_level++;
+			debug_level++;
 			break;
 		case 'e':
 			echo = 1;
