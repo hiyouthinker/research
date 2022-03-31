@@ -110,13 +110,18 @@ restart:
 	while (1) {
 		memset(buf, 0, sizeof(buf));
 		ret = recv(accept_fd, buf, sizeof(buf), 0);
-		if (!ret)
+		switch (ret) {
+		case -1:
+			printf("failed to recv: %s\n", strerror(errno));
+		case 0:
+			close(accept_fd);
 			goto restart;
-
-		printf("size: %d, content: %s\n", ret, buf);
-
+		default:
+			printf("size: %d, content: %s\n", ret, buf);
+			break;
+		}
 		if (send(accept_fd, buf, strlen(buf), 0) < 0) {
-			perror("send");
+			printf("failed to send: %s\n", strerror(errno));
 			goto error;
 		}
 	}

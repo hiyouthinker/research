@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
 	};
 	char *file = NULL;
 	char *words = "hello!";
-	char buf[128];
+	char buf[1024 * 10];
 
 	while ((opt = getopt(argc, argv, "p:w:ndh")) != -1) {
 		switch (opt) {
