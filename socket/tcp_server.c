@@ -8,17 +8,11 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <signal.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <signal.h>
-
-#define SO_KEEPALIVE	9
-
-#define TCP_KEEPIDLE	4	/* Start keeplives after this period */
-#define TCP_KEEPINTVL	5	/* Interval between keepalives */
-#define TCP_KEEPCNT		6	/* Number of keepalives before death */
 
 static int listener_fd = -1;
 static int pause_listener_ok = 0;
@@ -35,6 +29,7 @@ static void usage(char *cmd)
 	printf("\t-r\tenable reuseaddr\n");
 	printf("\t-R\tenable reuseport\n");
 	printf("\t-k\tenable keepalive\n");
+	printf("\t-f\tTCP Fast Open\n");
 	exit(0);
 }
 
@@ -128,9 +123,10 @@ int main(int argc, char *argv[])
 	struct sockaddr_in addr;
 	int reuseaddr = 0, reuseport = 0, accept_fd;
 	int keepalive_interval = 3, keepalive = 0, one = 1;
+	int tcp_fast_open = -1;
 	struct linger linger = {0, 0};
 
-	while ((opt = getopt(argc, argv, "l:L:p:rRk:h")) != -1) {
+	while ((opt = getopt(argc, argv, "l:L:p:rRk:f:h")) != -1) {
 		switch (opt) {
 		case 'l':
 			local_ip = optarg;
@@ -152,6 +148,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'k':
 			keepalive = atoi(optarg);
+			break;
+		case 'f':
+			tcp_fast_open = atoi(optarg);
 			break;
 		default:
 		case 'h':
@@ -201,6 +200,12 @@ int main(int argc, char *argv[])
 //		setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, (void *)&keepalive_interval, sizeof(keepalive_interval));
 		setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive, sizeof(keepalive));
 	}
+
+	if ((tcp_fast_open > 0) && setsockopt(fd, IPPROTO_TCP, TCP_FASTOPEN, (void *) &tcp_fast_open, sizeof(int))) {
+		perror("setsockopt for fast open");
+		goto error;
+	}
+
 #if 0
 	setsockopt(fd, SOL_IP, IP_TRANSPARENT, &one, sizeof(one));
 #endif
