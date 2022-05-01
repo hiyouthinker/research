@@ -7,18 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/types.h>
 #include <sys/stat.h>
-#include <signal.h>
+#include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
-
-#define TCP_QUICKACK		12	/* Block/reenable quick acks */
-
-#define TCP_KEEPIDLE	4	/* Start keeplives after this period */
-#define TCP_KEEPINTVL	5	/* Interval between keepalives */
-#define TCP_KEEPCNT		6	/* Number of keepalives before death */
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <signal.h>
 
 static void usage(char *cmd)
 {
@@ -31,6 +26,7 @@ static void usage(char *cmd)
 	printf("\t-S\tSRC-PORT\n");
 	printf("\t-p\tenable pingpong\n");
 	printf("\t-k\tenable keepalive\n");
+	printf("\t-f\tenable fastopen\n");
 	exit(0);
 }
 
@@ -42,8 +38,9 @@ int main(int argc, char *argv[])
 	char buf[128];
 	struct sockaddr_in addr;
 	int sport = 0, dport = 80;
+	int tcp_fast_open = 0;
 
-	while ((opt = getopt(argc, argv, "cd:D:s:S:pk:h")) != -1) {
+	while ((opt = getopt(argc, argv, "cd:D:s:S:pk:fh")) != -1) {
 		switch (opt) {
 		case 'c':
 			close_after_connect = 1;
@@ -69,6 +66,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'k':
 			keepalive = atoi(optarg);
+			break;
+		case 'f':
+			tcp_fast_open = 1;
 			break;
 		default:
 		case 'h':
@@ -110,14 +110,26 @@ int main(int argc, char *argv[])
 	addr.sin_addr.s_addr = inet_addr(dip);
 	len = sizeof(struct sockaddr_in);
 
-	printf("Prepare to connect to %s:%d from %s:%d, and pingpong is %s\n"
-		, dip, dport, sip ?: "0.0.0.0", sport, pingpong ? "enable" : "disable");
+	printf("Prepare to connect to %s:%d from %s:%d\n"
+		, dip, dport, sip ?: "0.0.0.0", sport);
+
+	if (tcp_fast_open) {
+		if (setsockopt(fd, IPPROTO_TCP, TCP_FASTOPEN_CONNECT,
+				(void *)&tcp_fast_open, sizeof(tcp_fast_open)) < 0) {
+			perror("setsockopt for fastopen");
+			goto done;
+		}
+		printf("fastopen is enable\n");
+	}
 
 	if (pingpong) {
 		int quick_ack_off = 0;
+
 		if (setsockopt(fd, IPPROTO_TCP, TCP_QUICKACK, (void *)&quick_ack_off, sizeof(quick_ack_off)) < 0) {
 			printf("setsockopt for TCP_QUICKACK: %s\n", strerror(errno));
+			goto done;
 		}
+		printf("pingpong is enable\n");
 	}
 
 	if (connect(fd, (struct sockaddr *)&addr, len) < 0) {
