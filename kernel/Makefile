@@ -1,4 +1,4 @@
-obj-m := debug.o get_infos.o get_socket_info.o syscall_hijack.o print_skb.o
+obj-m := debug.o get_infos.o get_socket_info.o syscall_hijack.o print_skb.o kallsyms_lookup_name.o
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD:=$(shell pwd)
 all:
