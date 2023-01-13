@@ -12,10 +12,10 @@
 
 /* for linux-4.15 */
 #ifdef DRV_IXGBE
-#include "include/ixgbe/ixgbe.h"
+#include <ixgbe/ixgbe.h>
 #else
-#include "include/i40e/i40e.h"
-#include "include/i40e/i40e_diag.h"
+#include <i40e/i40e.h>
+#include <i40e/i40e_diag.h>
 #endif
 
 static char *name;
