@@ -18,6 +18,9 @@
 #define SESSION_OUTER_MAP "session_nat_table_outer"
 #define PROC_MAP_PATH     "/proc/net/map/print_map"
 
+/*
+ * gcc -I../build/usr/include -L../build/usr/lib64/ map_observer.c -o map_observer -lbpf -lelf -lz -Wall
+ */
 int main(int argc, char **argv)
 {
 	char buf[128];
