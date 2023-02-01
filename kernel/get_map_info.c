@@ -2,11 +2,13 @@
  * BigBro @2023
  */
 
+#include <linux/version.h>
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
 #include <net/net_namespace.h>
-#include <linux/version.h>
 #include <linux/kprobes.h>
 #include <linux/bpf.h>
 #include <linux/math.h> // for round_up
@@ -433,7 +435,7 @@ static int __init get_map_info_init(void)
 
 	pde = proc_create("print_map", 0644, map_dir, &map_print_proc_ops);
 	if (!pde) {
-		printk("Can't create map map/print_map.\n");
+		printk("Can't create map/print_map.\n");
 		goto proc_create_err;
 	}
 
@@ -456,3 +458,4 @@ static void __exit get_map_info_cleanup(void)
 
 module_init(get_map_info_init);
 module_exit(get_map_info_cleanup);
+#endif
