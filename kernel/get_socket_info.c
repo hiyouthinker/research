@@ -23,7 +23,7 @@ MODULE_PARM_DESC(fd1, "fd for listen");
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("BigBro");
-MODULE_DESCRIPTION("for debug");
+MODULE_DESCRIPTION("for socket infos");
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,11,0)
 static struct file *__fget_files(struct files_struct *files, unsigned int fd,

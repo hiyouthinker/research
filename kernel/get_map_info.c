@@ -441,7 +441,7 @@ static int __init get_map_info_init(void)
 	return 0;
 
 proc_create_err:
-	remove_proc_entry("toa", NULL);
+	remove_proc_entry("map", NULL);
 proc_mkdir_err:
 	return -1;
 }
