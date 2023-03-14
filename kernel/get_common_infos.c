@@ -12,10 +12,16 @@
 
 #define DRV_IXGBE
 
+#define GET_PRIVATE_DATA
+
 #ifdef GET_PRIVATE_DATA
-/* for linux-4.15 */
 #ifdef DRV_IXGBE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
+#include <ixgbe_5.15/ixgbe.h>
+#else
+/* for linux-4.15 */
 #include <ixgbe/ixgbe.h>
+#endif
 #else
 #include <i40e/i40e.h>
 #include <i40e/i40e_diag.h>
@@ -87,7 +93,10 @@ static int __init get_common_infos_init(void)
 		struct ixgbe_adapter *adapter;
 
 		adapter = netdev_priv(dev);
-		printk("atr_sample_rate: %u\n", adapter->atr_sample_rate);
+		printk("num_rx_queues: %u\n", adapter->num_rx_queues);
+		if (adapter->num_rx_queues > 0) {
+			printk("rx_ring[0]->rx_offset: %u\n", adapter->rx_ring[0]->rx_offset);
+		}
 	}
 #else
 	{
