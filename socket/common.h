@@ -8,9 +8,10 @@
 	((unsigned char *)&addr)[3]
 #define NIPQUAD_FMT "%u.%u.%u.%u"
 
-#define PRINT_EMERG			0
-#define PRINT_NOTICE		1
-#define PRINT_DEBUG			2
+#define PRINT_EMERG  0
+#define PRINT_NOTICE 1
+#define PRINT_INFO   2
+#define PRINT_DEBUG  3
 
 static int debug_level = PRINT_EMERG;
 

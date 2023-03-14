@@ -108,7 +108,7 @@ static void *xmalloc(size_t size)
 	return p;
 }
 
-/* from busybox */
+/* from busybox/networking/nslookup.c */
 static struct query *add_query(int type, const char *dname)
 {
 	struct query *q;
@@ -125,6 +125,158 @@ static struct query *add_query(int type, const char *dname)
 	q->qlen = qlen;
 
 	return q;
+}
+
+/* from busybox/networking/nslookup.c */
+static int parse_reply(const unsigned char *msg, size_t len)
+{
+	HEADER *header;
+
+	ns_msg handle;
+	ns_rr rr;
+	int i, n, rdlen;
+	const char *format = NULL;
+	char astr[INET6_ADDRSTRLEN], dname[MAXDNAME];
+	const unsigned char *cp;
+
+	header = (HEADER *)msg;
+	if (!header->aa)
+		printf("Non-authoritative answer:\n");
+
+	if (ns_initparse(msg, len, &handle) != 0) {
+		//printf("Unable to parse reply: %s\n", strerror(errno));
+		return -1;
+	}
+
+	for (i = 0; i < ns_msg_count(handle, ns_s_an); i++) {
+		if (ns_parserr(&handle, ns_s_an, i, &rr) != 0) {
+			//printf("Unable to parse resource record: %s\n", strerror(errno));
+			return -1;
+		}
+
+		rdlen = ns_rr_rdlen(rr);
+
+		switch (ns_rr_type(rr))
+		{
+		case ns_t_a:
+			if (rdlen != 4) {
+				printf("unexpected A record length %d\n", rdlen);
+				return -1;
+			}
+			inet_ntop(AF_INET, ns_rr_rdata(rr), astr, sizeof(astr));
+			debug_print(PRINT_INFO, "Name:\t%s\nAddress: %s\n", ns_rr_name(rr), astr);
+			break;
+
+		case ns_t_aaaa:
+			if (rdlen != 16) {
+				printf("unexpected AAAA record length %d\n", rdlen);
+				return -1;
+			}
+			inet_ntop(AF_INET6, ns_rr_rdata(rr), astr, sizeof(astr));
+			/* bind-utils-9.11.3 uses the same format for A and AAAA answers */
+			debug_print(PRINT_INFO, "Name:\t%s\nAddress: %s\n", ns_rr_name(rr), astr);
+			break;
+
+		case ns_t_ns:
+			if (!format)
+				format = "%s\tnameserver = %s\n";
+			/* fall through */
+
+		case ns_t_cname:
+			if (!format)
+				format = "%s\tcanonical name = %s\n";
+			/* fall through */
+
+		case ns_t_ptr:
+			if (!format)
+				format = "%s\tname = %s\n";
+			if (ns_name_uncompress(ns_msg_base(handle), ns_msg_end(handle),
+					ns_rr_rdata(rr), dname, sizeof(dname)) < 0
+			) {
+				//printf("Unable to uncompress domain: %s\n", strerror(errno));
+				return -1;
+			}
+			printf(format, ns_rr_name(rr), dname);
+			break;
+
+		case ns_t_mx:
+			if (rdlen < 2) {
+				printf("MX record too short\n");
+				return -1;
+			}
+			n = ns_get16(ns_rr_rdata(rr));
+			if (ns_name_uncompress(ns_msg_base(handle), ns_msg_end(handle),
+					ns_rr_rdata(rr) + 2, dname, sizeof(dname)) < 0
+			) {
+				//printf("Cannot uncompress MX domain: %s\n", strerror(errno));
+				return -1;
+			}
+			printf("%s\tmail exchanger = %d %s\n", ns_rr_name(rr), n, dname);
+			break;
+
+		case ns_t_txt:
+			if (rdlen < 1) {
+				//printf("TXT record too short\n");
+				return -1;
+			}
+			n = *(unsigned char *)ns_rr_rdata(rr);
+			if (n > 0) {
+				memset(dname, 0, sizeof(dname));
+				memcpy(dname, ns_rr_rdata(rr) + 1, n);
+				printf("%s\ttext = \"%s\"\n", ns_rr_name(rr), dname);
+			}
+			break;
+
+		case ns_t_soa:
+			if (rdlen < 20) {
+				printf("SOA record too short:%d\n", rdlen);
+				return -1;
+			}
+
+			debug_print(PRINT_INFO, "%s\n", ns_rr_name(rr));
+
+			cp = ns_rr_rdata(rr);
+			n = ns_name_uncompress(ns_msg_base(handle), ns_msg_end(handle),
+			                       cp, dname, sizeof(dname));
+			if (n < 0) {
+				//printf("Unable to uncompress domain: %s\n", strerror(errno));
+				return -1;
+			}
+
+			debug_print(PRINT_INFO, "\torigin = %s\n", dname);
+			cp += n;
+
+			n = ns_name_uncompress(ns_msg_base(handle), ns_msg_end(handle),
+			                       cp, dname, sizeof(dname));
+			if (n < 0) {
+				//printf("Unable to uncompress domain: %s\n", strerror(errno));
+				return -1;
+			}
+
+			debug_print(PRINT_INFO, "\tmail addr = %s\n", dname);
+			cp += n;
+
+			debug_print(PRINT_INFO, "\tserial = %lu\n", ns_get32(cp));
+			cp += 4;
+
+			debug_print(PRINT_INFO, "\trefresh = %lu\n", ns_get32(cp));
+			cp += 4;
+
+			debug_print(PRINT_INFO, "\tretry = %lu\n", ns_get32(cp));
+			cp += 4;
+
+			debug_print(PRINT_INFO, "\texpire = %lu\n", ns_get32(cp));
+			cp += 4;
+
+			debug_print(PRINT_INFO, "\tminimum = %lu\n", ns_get32(cp));
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	return i;
 }
 
 static int send_query(int fd, struct query *q)
@@ -155,6 +307,13 @@ static int send_query(int fd, struct query *q)
 	rcode = reply[3] & 0x0f;
 
 	debug_print(PRINT_DEBUG, "response matches %s (rcode: %s)\n", q->name, rcodes[rcode]);
+
+	if (rcode != 0) {
+		printf("** server can't find %s: %s\n", q->name, rcodes[rcode]);
+	} else {
+		if (parse_reply(reply, len) < 0)
+			printf("*** Can't find %s: Parse error\n", q->name);
+	}
 
 	return 0;
 }
