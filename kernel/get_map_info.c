@@ -10,14 +10,23 @@
 #include <linux/proc_fs.h>
 #include <net/net_namespace.h>
 #include <linux/kprobes.h>
+#include <linux/jhash.h> // for jhash
 #include <linux/bpf.h>
-#include <linux/math.h> // for round_up
+#include <linux/math.h>   // for round_up
 #include <linux/filter.h> // for struct bpf_prog
+#include <linux/rculist_nulls.h> // for hlist_nulls_first_rcu
 
 #include <percpu_freelist.h>
 #include <bpf_lru_list.h>
 
 #define PRINT_KEY_VALUE
+#define USE_KALLSYSMS_LOOKUP
+
+#ifndef USE_KALLSYSMS_LOOKUP
+static unsigned long pbpf_map_fops = 0xffffffffa20363a0;
+module_param(pbpf_map_fops, ulong, 0);
+MODULE_PARM_DESC(pbpf_map_fops, "pointer to bpf_map_fops");
+#endif
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("BigBro");
@@ -28,6 +37,17 @@ MODULE_DESCRIPTION("print map infos");
 #define LOCAL_FREE_LIST_IDX	LOCAL_LIST_IDX(BPF_LRU_LOCAL_LIST_T_FREE)
 #define LOCAL_PENDING_LIST_IDX	LOCAL_LIST_IDX(BPF_LRU_LOCAL_LIST_T_PENDING)
 #define IS_LOCAL_LIST_TYPE(t)	((t) >= BPF_LOCAL_LIST_T_OFFSET)
+
+struct bucket {
+	struct hlist_nulls_head head;
+	union {
+		raw_spinlock_t raw_lock;
+		spinlock_t     lock;
+	};
+};
+
+#define HASHTAB_MAP_LOCK_COUNT 8
+#define HASHTAB_MAP_LOCK_MASK (HASHTAB_MAP_LOCK_COUNT - 1)
 
 struct bpf_htab {
 	struct bpf_map map;
@@ -41,6 +61,9 @@ struct bpf_htab {
 	atomic_t count;	/* number of elements in this hashtable */
 	u32 n_buckets;	/* number of hash buckets */
 	u32 elem_size;	/* size of each element in bytes */
+	u32 hashrnd;
+	struct lock_class_key lockdep_key;
+	int __percpu *map_locked[HASHTAB_MAP_LOCK_COUNT];
 };
 
 #ifdef PRINT_KEY_VALUE
@@ -135,6 +158,7 @@ typedef struct flow_value {
 static struct proc_dir_entry *map_dir;
 static int map_fd = -1;
 
+#ifdef USE_KALLSYSMS_LOOKUP
 static unsigned long (*pkallsyms_lookup_name)(const char *name) = NULL;
 static struct bpf_map *(*pbpf_map_get)(u32 ufd) = NULL;
 
@@ -143,9 +167,10 @@ static int get_kallsyms_lookup_name(void)
 	static struct kprobe kp = {
 		.symbol_name = "kallsyms_lookup_name"
 	};
+	int ret = register_kprobe(&kp);
 
-	if (register_kprobe(&kp) < 0)
-		return -1;
+	if (ret)
+		return ret;
 
 	unregister_kprobe(&kp);
 
@@ -153,6 +178,7 @@ static int get_kallsyms_lookup_name(void)
 
 	return 0;
 }
+#endif
 
 static ssize_t 
 map_print_proc_write(struct file *file, const char __user *buffer,
@@ -246,6 +272,50 @@ static void bpf_timer_show(struct bpf_lru_node *node, struct bpf_map *map)
 }
 #endif
 
+#ifndef USE_KALLSYSMS_LOOKUP
+static struct bpf_map *____bpf_map_get(struct fd f)
+{
+	if (!f.file)
+		return ERR_PTR(-EBADF);
+	if (f.file->f_op != (void *)pbpf_map_fops) {
+		fdput(f);
+		return ERR_PTR(-EINVAL);
+	}
+
+	return f.file->private_data;
+}
+
+static struct bpf_map *pbpf_map_get(u32 ufd)
+{
+	struct fd f = fdget(ufd);
+	struct bpf_map *map;
+
+	map = ____bpf_map_get(f);
+	if (IS_ERR(map))
+		return map;
+
+	bpf_map_inc(map);
+	fdput(f);
+
+	return map;
+}
+#endif
+
+static inline struct bucket *__select_bucket(struct bpf_htab *htab, u32 hash)
+{
+	return &htab->buckets[hash & (htab->n_buckets - 1)];
+}
+
+static inline struct hlist_nulls_head *select_bucket(struct bpf_htab *htab, u32 hash)
+{
+	return &__select_bucket(htab, hash)->head;
+}
+
+static inline u32 htab_map_hash(const void *key, u32 key_len, u32 hashrnd)
+{
+	return jhash(key, key_len, hashrnd);
+}
+
 static int
 map_print_proc_show(struct seq_file *m, void *v)
 {
@@ -260,6 +330,10 @@ map_print_proc_show(struct seq_file *m, void *v)
 	int active_ref1 = 0, inactive_ref1 = 0, local_pending_ref1 = 0;
 	int active_ref2 = 0, active_total = 0, inactive_total = 0;
 	int total = 0;
+	int i = 0, j = 0;
+	u32 hash, key_size;
+	struct hlist_nulls_head *head;
+	struct htab_elem *next;
 
 	printk("map_fd: %d\n", map_fd);
 
@@ -275,6 +349,39 @@ map_print_proc_show(struct seq_file *m, void *v)
 		htab->map.map_type,
 		htab->map.max_entries,
 		htab->n_buckets);
+
+	seq_printf(m, "key_size/value_size: %u/%u\n", htab->map.key_size, htab->map.value_size);
+
+	key_size = htab->map.key_size;
+
+	for (; i < htab->n_buckets; i++) {
+		char buf[512] = {0};
+		int l = 0;
+
+		head = select_bucket(htab, i);
+
+		/* pick first element in the bucket */
+		next = hlist_nulls_entry_safe(rcu_dereference_raw(hlist_nulls_first_rcu(head)),
+					  struct htab_elem, hash_node);
+		if (next) {
+			/* if it's not empty, just return it */
+			for (j = 0; j < key_size; j++) {
+				l += snprintf(buf + l, sizeof(buf), "%02x ", (0xff & next->key[j]));
+			}
+			seq_printf(m, "[%s]\n", buf);
+
+			hash = htab_map_hash(next->key, key_size, htab->hashrnd);
+
+			seq_printf(m, "hash: %u/%u, hash & 0x%04x: %u, index: %d\n",
+				hash,
+				next->hash,
+				htab->n_buckets - 1,
+				hash & (htab->n_buckets - 1),
+				i);
+			/* got first key */
+			return 0;
+		}
+	}
 
 	clru = &htab->lru.common_lru;
 
@@ -415,9 +522,11 @@ static const struct file_operations map_print_proc_ops = {
 static int __init get_map_info_init(void)
 {
 	struct proc_dir_entry *pde;
+#ifdef USE_KALLSYSMS_LOOKUP
+	int ret = get_kallsyms_lookup_name();
 
-	if (get_kallsyms_lookup_name() < 0) {
-		printk("Can't get kallsyms_lookup_name symbol.\n");
+	if (ret) {
+		printk("Can't get kallsyms_lookup_name symbol (ret = %d).\n", ret);
 		return -1;
 	}
 
@@ -426,6 +535,9 @@ static int __init get_map_info_init(void)
 		printk("Can't get bpf_map_get symbol.\n");
 		return -1;
 	}
+#else
+	printk("pbpf_map_fops: %lx\n", pbpf_map_fops);
+#endif
 
 	map_dir = proc_mkdir("map", init_net.proc_net);
 	if (!map_dir) {
