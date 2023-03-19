@@ -14,23 +14,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("BigBro");
 MODULE_DESCRIPTION("get proc important statistics");
 
-static unsigned long (*pkallsyms_lookup_name)(const char *name) = NULL;
-
-static int get_kallsyms_lookup_name(void)
-{
-	static struct kprobe kp = {
-		.symbol_name = "kallsyms_lookup_name"
-	};
-
-	if (register_kprobe(&kp) < 0)
-		return -1;
-
-	unregister_kprobe(&kp);
-
-	pkallsyms_lookup_name = (typeof(pkallsyms_lookup_name))kp.addr;
-
-	return 0;
-}
+#include "get_kallsyms_lookup_name.c"
 
 static struct snmp_mib mibs[] = {
 	SNMP_MIB_ITEM("SyncookiesSent", LINUX_MIB_SYNCOOKIESSENT),

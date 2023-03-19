@@ -26,6 +26,10 @@
 static unsigned long pbpf_map_fops = 0xffffffffa20363a0;
 module_param(pbpf_map_fops, ulong, 0);
 MODULE_PARM_DESC(pbpf_map_fops, "pointer to bpf_map_fops");
+#else
+#include "get_kallsyms_lookup_name.c"
+
+static struct bpf_map *(*pbpf_map_get)(u32 ufd) = NULL;
 #endif
 
 MODULE_LICENSE("GPL");
@@ -158,27 +162,7 @@ typedef struct flow_value {
 static struct proc_dir_entry *map_dir;
 static int map_fd = -1;
 
-#ifdef USE_KALLSYSMS_LOOKUP
-static unsigned long (*pkallsyms_lookup_name)(const char *name) = NULL;
-static struct bpf_map *(*pbpf_map_get)(u32 ufd) = NULL;
 
-static int get_kallsyms_lookup_name(void)
-{
-	static struct kprobe kp = {
-		.symbol_name = "kallsyms_lookup_name"
-	};
-	int ret = register_kprobe(&kp);
-
-	if (ret)
-		return ret;
-
-	unregister_kprobe(&kp);
-
-	pkallsyms_lookup_name = (typeof(pkallsyms_lookup_name))kp.addr;
-
-	return 0;
-}
-#endif
 
 static ssize_t 
 map_print_proc_write(struct file *file, const char __user *buffer,

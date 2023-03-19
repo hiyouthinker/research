@@ -94,9 +94,11 @@ static int __init get_common_infos_init(void)
 
 		adapter = netdev_priv(dev);
 		printk("num_rx_queues: %u\n", adapter->num_rx_queues);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
 		if (adapter->num_rx_queues > 0) {
 			printk("rx_ring[0]->rx_offset: %u\n", adapter->rx_ring[0]->rx_offset);
 		}
+#endif
 	}
 #else
 	{
