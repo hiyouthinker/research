@@ -506,8 +506,10 @@ static const struct file_operations map_print_proc_ops = {
 static int __init get_map_info_init(void)
 {
 	struct proc_dir_entry *pde;
+	kallsyms_lookup_name_type pkallsyms_lookup_name;
+
 #ifdef USE_KALLSYSMS_LOOKUP
-	int ret = get_kallsyms_lookup_name();
+	int ret = get_kallsyms_lookup_name(&pkallsyms_lookup_name);
 
 	if (ret) {
 		printk("Can't get kallsyms_lookup_name symbol (ret = %d).\n", ret);
@@ -519,6 +521,7 @@ static int __init get_map_info_init(void)
 		printk("Can't get bpf_map_get symbol.\n");
 		return -1;
 	}
+	printk("pbpf_map_get: %pK\n", pbpf_map_get);
 #else
 	printk("pbpf_map_fops: %lx\n", pbpf_map_fops);
 #endif

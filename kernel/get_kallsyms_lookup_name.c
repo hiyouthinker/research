@@ -2,9 +2,9 @@
  * BigBro @2023
  */
 
-static unsigned long (*pkallsyms_lookup_name)(const char *name) = NULL;
+typedef unsigned long (*kallsyms_lookup_name_type)(const char *name);
 
-static int get_kallsyms_lookup_name(void)
+static int get_kallsyms_lookup_name(kallsyms_lookup_name_type *pfunc)
 {
 	static struct kprobe kp = {
 		.symbol_name = "kallsyms_lookup_name"
@@ -16,7 +16,7 @@ static int get_kallsyms_lookup_name(void)
 
 	unregister_kprobe(&kp);
 
-	pkallsyms_lookup_name = (typeof(pkallsyms_lookup_name))kp.addr;
+	*pfunc = (kallsyms_lookup_name_type)kp.addr;
 
 	return 0;
 }

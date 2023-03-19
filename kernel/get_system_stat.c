@@ -16,6 +16,8 @@ MODULE_DESCRIPTION("get proc important statistics");
 
 #include "get_kallsyms_lookup_name.c"
 
+static kallsyms_lookup_name_type pkallsyms_lookup_name;
+
 static struct snmp_mib mibs[] = {
 	SNMP_MIB_ITEM("SyncookiesSent", LINUX_MIB_SYNCOOKIESSENT),
 	SNMP_MIB_ITEM("SyncookiesRecv", LINUX_MIB_SYNCOOKIESRECV),
@@ -126,7 +128,7 @@ static const struct file_operations system_stat_ops_complete = {
 
 static int __init get_system_stat_init(void)
 {
-	if (get_kallsyms_lookup_name() < 0) {
+	if (get_kallsyms_lookup_name(&pkallsyms_lookup_name) < 0) {
 		printk("Can't get kallsyms_lookup_name symbol.\n");
 		return -1;
 	}
