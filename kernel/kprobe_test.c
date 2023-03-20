@@ -10,7 +10,7 @@
 #include <linux/netdevice.h>
 
 #define MAX_SYMBOL_LEN	64
-static char symbol[MAX_SYMBOL_LEN] = "ip_rcv";
+static char symbol[MAX_SYMBOL_LEN] = "ixgbe_run_xdp";
 module_param_string(symbol, symbol, sizeof(symbol), 0644);
 
 static int __kprobes handler_pre(struct kprobe *p, struct pt_regs *regs);
@@ -37,12 +37,30 @@ static int __kprobes handler_pre(struct kprobe *p, struct pt_regs *regs)
 	struct packet_type *pt = (struct packet_type *)regs->dx;
 	struct net_device *orig_dev = (struct net_device *)regs->cx;
 
-	if (!strcmp(p->symbol_name, "ip_rcv"))
+	if (!strcmp(p->symbol_name, "ip_rcv")) {
 		pr_info("<%s> skb->dev->name: %s, dev->name: %s, pt->func: %pK, orig_dev->name: %s\n",
 			p->symbol_name, skb->dev->name, dev->name, pt->func, orig_dev->name);
-	else
-		pr_info("<%s> di/si/dx/cx = 0x%lx/0x%lx/0x%lx/0x%lx\n",
-			p->symbol_name, regs->di, regs->si, regs->dx, regs->cx);
+	} else if (!strcmp(p->symbol_name, "bpf_prog_run_generic_xdp")) {
+		struct sk_buff *skb = (struct sk_buff *)regs->di;
+		u32 mac_len;
+		struct ethhdr *eth = (struct ethhdr *)skb_mac_header(skb);
+
+		mac_len = skb->data - skb_mac_header(skb);
+
+		pr_info("<%s> skb_headroom(skb): %u, mac_len: %u\n",
+			p->symbol_name, skb_headroom(skb), mac_len);
+
+		pr_info("<%s> proto: 0x%04x\n",
+			p->symbol_name, ntohs(eth->h_proto));
+	} else if (!strcmp(p->symbol_name, "ixgbe_run_xdp")) {
+	//	struct ixgbe_adapter *adapter = (struct ixgbe_adapter *)regs->di;
+	//	struct ixgbe_ring *rx_ring = (struct ixgbe_ring *)regs->si;
+		struct xdp_buff *xdp = (struct xdp_buff *)regs->dx;
+
+		pr_info("<%s> data_hard_start: %lx, data: %lx, data_end: %lx, data_meta: %lx\n",
+			p->symbol_name, (unsigned long)xdp->data_hard_start, (unsigned long)xdp->data,
+			(unsigned long)xdp->data_end, (unsigned long)xdp->data_meta);
+	}
 #endif
 	return 0;
 }
@@ -51,8 +69,6 @@ static int __kprobes handler_pre(struct kprobe *p, struct pt_regs *regs)
 static void __kprobes handler_post(struct kprobe *p, struct pt_regs *regs, unsigned long flags)
 {
 #ifdef CONFIG_X86
-	pr_info("<%s> di/si/dx/cx = 0x%lx/0x%lx/0x%lx/0x%lx\n",
-		p->symbol_name, regs->di, regs->si, regs->dx, regs->cx);
 #endif
 }
 
