@@ -8,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/kprobes.h>
 #include <linux/netdevice.h>
+#include <linux/filter.h>
 
 #define MAX_SYMBOL_LEN	64
 static char symbol[MAX_SYMBOL_LEN] = "ixgbe_run_xdp";
