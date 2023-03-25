@@ -11,7 +11,7 @@ static unsigned long (*pkallsyms_lookup_name)(const char *name) = NULL;
 
 int __init lookup_test_init(void)
 {
-	static struct kprobe kp = {
+	struct kprobe kp = {
 		.symbol_name = "kallsyms_lookup_name"
 	};
 

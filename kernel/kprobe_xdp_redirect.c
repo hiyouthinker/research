@@ -12,7 +12,9 @@
 #include <linux/module.h>
 #include <linux/kprobes.h>
 #include <linux/netdevice.h>
+#include <linux/version.h>
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
 #define MAX_SYMBOL_LEN	64
 static char symbol[MAX_SYMBOL_LEN] = "cpu_map_bpf_prog_run_skb";
 
@@ -122,7 +124,7 @@ static void __kprobes handler_post(struct kprobe *p, struct pt_regs *regs, unsig
 static int __init kprobe_init(void)
 {
 	int ret;
- 	kallsyms_lookup_name_type pkallsyms_lookup_name;
+	kallsyms_lookup_name_type pkallsyms_lookup_name;
 
 	ret = register_kprobe(&kp);
 	if (ret < 0) {
@@ -161,3 +163,6 @@ static void __exit kprobe_exit(void)
 module_init(kprobe_init)
 module_exit(kprobe_exit)
 MODULE_LICENSE("GPL");
+#else
+MODULE_LICENSE("GPL");
+#endif

@@ -149,14 +149,12 @@ static struct socket *sockfd_lookup_light(int fd, int *err, int *fput_needed, st
 	return NULL;
 }
 
-#if 0
-static struct task_struct *find_task_by_pid_ns(pid_t nr, struct pid_namespace *ns)
+static struct task_struct *__find_task_by_pid_ns(pid_t nr, struct pid_namespace *ns)
 {
 	RCU_LOCKDEP_WARN(!rcu_read_lock_held(),
 			 "find_task_by_pid_ns() needs rcu_read_lock() protection");
 	return pid_task(find_pid_ns(nr, ns), PIDTYPE_PID);
 }
-#endif
 
 static int __init get_socket_info_init(void)
 {
@@ -165,7 +163,7 @@ static int __init get_socket_info_init(void)
 
 	rcu_read_lock();
 	if (pid1) {
-		ts = find_task_by_pid_ns(pid1, &init_pid_ns);
+		ts = __find_task_by_pid_ns(pid1, &init_pid_ns);
 		if (ts) {
 			printk("%s/%ld: socket: %ld/%p\n",
 				ts->comm, pid1, fd1,
@@ -174,7 +172,7 @@ static int __init get_socket_info_init(void)
 	}
 
 	if (pid2) {
-		ts = find_task_by_pid_ns(pid2, &init_pid_ns);
+		ts = __find_task_by_pid_ns(pid2, &init_pid_ns);
 		if (ts) {
 			printk("%s/%ld: socket: %ld/%p\n",
 				ts->comm, pid2, fd2,

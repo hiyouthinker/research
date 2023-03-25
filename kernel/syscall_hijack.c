@@ -4,7 +4,7 @@
 
 #include <linux/module.h>
 #include <linux/unistd.h> /* for __NR_xxx */
-#include <linux/kallsyms.h>
+#include <linux/kprobes.h>
 
 #define SYSCALL_NUM	__NR_rename
 //#define SET_REG_FOR_PERM
@@ -15,6 +15,8 @@ static int (*orig_syscall_saved)(void);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("BigBro");
 MODULE_DESCRIPTION("test for hijack of syscall");
+
+#include "get_kallsyms_lookup_name.c"
 
 #ifdef SET_REG_FOR_PERM
 static unsigned int clear_and_return_cr0(void)
@@ -118,9 +120,18 @@ static void cancel_hijack(void)
 
 static int __init init_hijack_module(void)
 {
+	int ret;
+	kallsyms_lookup_name_type pkallsyms_lookup_name;
+
 	printk("loading hijack module\n");
 
-	sys_call_table = (unsigned long *)kallsyms_lookup_name("sys_call_table");
+	ret = get_kallsyms_lookup_name(&pkallsyms_lookup_name);
+	if (ret) {
+		printk("Can't get kallsyms_lookup_name symbol (ret = %d).\n", ret);
+		return -1;
+	}
+
+	sys_call_table = (unsigned long *)pkallsyms_lookup_name("sys_call_table");
 	orig_syscall_saved = (int(*)(void))(sys_call_table[SYSCALL_NUM]);
 
 	set_hijack();

@@ -3,9 +3,9 @@
  */
 
 #include <linux/version.h>
+#include <linux/module.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
-#include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
 #include <net/net_namespace.h>
@@ -557,4 +557,6 @@ static void __exit get_map_info_cleanup(void)
 
 module_init(get_map_info_init);
 module_exit(get_map_info_cleanup);
+#else
+MODULE_LICENSE("GPL");
 #endif
