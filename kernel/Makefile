@@ -1,4 +1,4 @@
-obj-m := livepatch_example.o kprobe_xdp_redirect.o kprobe_test.o get_system_stat.o get_map_info.o get_common_infos.o get_socket_info.o syscall_hijack.o print_skb.o kallsyms_lookup_name.o call_usermodehelper.o
+obj-m := livepatch_xdp.o livepatch_example.o kprobe_xdp_redirect.o kprobe_test.o get_system_stat.o get_map_info.o get_common_infos.o get_socket_info.o syscall_hijack.o print_skb.o kallsyms_lookup_name.o call_usermodehelper.o
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 EXTRA_CFLAGS += -I$(PWD)/include
