@@ -135,23 +135,26 @@ static int __init kprobe_init(void)
 	ret = get_kallsyms_lookup_name(&pkallsyms_lookup_name);
 	if (ret) {
 		printk("Can't get kallsyms_lookup_name symbol (ret = %d).\n", ret);
-		return -1;
+		goto fail;
 	}
 
 	pxdp_do_generic_redirect = (typeof(pxdp_do_generic_redirect))pkallsyms_lookup_name("xdp_do_generic_redirect");
 	if (!pxdp_do_generic_redirect) {
 		printk("Can't get xdp_do_generic_redirect symbol.\n");
-		return -1;
+		goto fail;
 	}
 
 	pbpf_prog_run_generic_xdp = (typeof(pbpf_prog_run_generic_xdp))pkallsyms_lookup_name("bpf_prog_run_generic_xdp");
 	if (!pbpf_prog_run_generic_xdp) {
 		printk("Can't get bpf_prog_run_generic_xdp symbol.\n");
-		return -1;
+		goto fail;
 	}
 
 	pr_info("Planted kprobe at %pK\n", kp.addr);
 	return 0;
+fail:
+	unregister_kprobe(&kp);
+	return -1;
 }
 
 static void __exit kprobe_exit(void)

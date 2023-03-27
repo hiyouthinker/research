@@ -7,7 +7,9 @@
 #include <linux/proc_fs.h>
 #include <linux/kernel.h>
 #include <linux/livepatch.h>
+#include <linux/version.h>
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
 MODULE_LICENSE("GPL");
 MODULE_INFO(livepatch, "Y");
 MODULE_AUTHOR("BigBro");
@@ -17,7 +19,6 @@ static int replace;
 module_param(replace, int, 0644);
 MODULE_PARM_DESC(replace, "replace (default=0)");
 
-#include <linux/seq_file.h>
 static int livepatch_meminfo_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%s: %s\n", THIS_MODULE->name,
@@ -113,3 +114,6 @@ static void test_klp_atomic_replace_exit(void)
 
 module_init(test_klp_atomic_replace_init);
 module_exit(test_klp_atomic_replace_exit);
+#else
+MODULE_LICENSE("GPL");
+#endif
