@@ -1,5 +1,9 @@
 /*
  * BigBro @2023
+ *
+ * fix kernel bug
+ * 		change 'return' to 'break'
+ *		see https://elixir.bootlin.com/linux/v6.2.6/source/kernel/bpf/cpumap.c#L196
  */
 
 #include <linux/module.h>
@@ -16,7 +20,7 @@
 MODULE_LICENSE("GPL");
 MODULE_INFO(livepatch, "Y");
 MODULE_AUTHOR("BigBro");
-MODULE_DESCRIPTION("Livepatch test: atomic replace");
+MODULE_DESCRIPTION("Livepatch: fix bug of cpumap for xdp generic mode");
 
 static int replace;
 module_param(replace, int, 0644);
@@ -112,7 +116,7 @@ static struct klp_patch my_patch = {
 };
 
 static int
-livepatch_proc_show(struct seq_file *m, void *v)
+livepatch_bpf_cpumap_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "old func: %pK, new func -> %pK\n", funcs[0].old_func, funcs[0].new_func);
 
@@ -120,13 +124,13 @@ livepatch_proc_show(struct seq_file *m, void *v)
 }
 
 static int
-livepatch_proc_open(struct inode *inode, struct file *file)
+livepatch_bpf_cpumap_proc_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, livepatch_proc_show, NULL);
+	return single_open(file, livepatch_bpf_cpumap_proc_show, NULL);
 }
 
 static ssize_t 
-livepatch_proc_write(struct file *file, const char __user *buffer,
+livepatch_bpf_cpumap_proc_write(struct file *file, const char __user *buffer,
 		size_t count, loff_t *f_pos)
 {
 	char cmd[32] = {0};
@@ -145,15 +149,15 @@ livepatch_proc_write(struct file *file, const char __user *buffer,
 	return count;	
 }
 
-static const struct proc_ops livepatch_proc_ops = {
-	.proc_open	= livepatch_proc_open,
+static const struct proc_ops livepatch_bpf_lru_update_proc_ops = {
+	.proc_open	= livepatch_bpf_cpumap_proc_open,
 	.proc_read	= seq_read,
 	.proc_lseek	= seq_lseek,
 	.proc_release = single_release,
-	.proc_write	= livepatch_proc_write,
+	.proc_write	= livepatch_bpf_cpumap_proc_write,
 };
 
-static int test_klp_atomic_replace_init(void)
+static int livepatch_bpf_cpumap_init(void)
 {
 	int ret;
 	struct proc_dir_entry *pde;
@@ -177,9 +181,9 @@ static int test_klp_atomic_replace_init(void)
 		return -1;
 	}
 
-	pde = proc_create("livepatch", 0644, NULL, &livepatch_proc_ops);
+	pde = proc_create("livepatch_bpf_cpumap", 0644, NULL, &livepatch_bpf_lru_update_proc_ops);
 	if (!pde) {
-		printk("Can't create /proc/livepatch.\n");
+		printk("Can't create /proc/livepatch_bpf_cpumap.\n");
 		return -1;
 	}
 
@@ -190,22 +194,22 @@ static int test_klp_atomic_replace_init(void)
 
 	return 0;
 remove_proc:
-	remove_proc_entry("livepatch", NULL);
+	remove_proc_entry("livepatch_bpf_cpumap", NULL);
 	return ret;
 }
 
 /*
  * In order to remove the ko module
- * 	1. echo 0 > /sys/kernel/livepatch/livepatch/enabled
+ * 	1. echo 0 > /sys/kernel/livepatch/livepatch_bpf_cpumap/enabled
  *	2. rmmod livepatch
  */
-static void test_klp_atomic_replace_exit(void)
+static void livepatch_bpf_cpumap_exit(void)
 {
-	remove_proc_entry("livepatch", NULL);
+	remove_proc_entry("livepatch_bpf_cpumap", NULL);
 }
 
-module_init(test_klp_atomic_replace_init);
-module_exit(test_klp_atomic_replace_exit);
+module_init(livepatch_bpf_cpumap_init);
+module_exit(livepatch_bpf_cpumap_exit);
 #else
 MODULE_LICENSE("GPL");
 #endif
