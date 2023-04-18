@@ -61,6 +61,8 @@ static void help(char *cmd)
 	printf("\t-S\tsource ip\n");
 	printf("\t-D\tdst ip\n");
 	printf("\t-H\tdomain\n");
+	printf("\t-c\ttotal loop times\n");
+	printf("\t-C\tper domain loop times\n");
 	printf("\t-d\tenable debug\n");
 
 	exit(0);
@@ -68,6 +70,8 @@ static void help(char *cmd)
 
 static void sig_handler(int signo)
 {
+	printf("received signal: %d\n", signo);
+
 	exit(0);
 }
 
@@ -131,7 +135,6 @@ static struct query *add_query(int type, const char *dname)
 static int parse_reply(const unsigned char *msg, size_t len)
 {
 	HEADER *header;
-
 	ns_msg handle;
 	ns_rr rr;
 	int i, n, rdlen;
@@ -383,13 +386,13 @@ int main (int argc, char **argv)
 	struct sockaddr_in addr = {
 		.sin_family = AF_INET,
 	};
-	__u16 sport, sport_beginning;
+	__u16 sport, sport_beginning = 10000;
 	char *domain = "t0.test.com";
 	__be32 src_ips[256] = {0};
 	__be32 dst_ips[256] = {0};
-	int i, j;
+	int i, j, total_count = 0, loop = 0, count_per_domain = 1;
 
-	while ((opt = getopt(argc, argv, "S:D:s:H:dh")) != -1) {
+	while ((opt = getopt(argc, argv, "S:D:s:H:c:C:dh")) != -1) {
 		switch (opt) {
 		case 'S':
 			if (convert_ips(optarg, src_ips) < 0)
@@ -412,6 +415,20 @@ int main (int argc, char **argv)
 		}
 		case 'H':
 			domain = optarg;
+			break;
+		case 'c':
+			total_count = atoi(optarg);
+			if (total_count <= 0) {
+				printf("invalid param: %s\n", optarg);
+				help(argv[0]);
+			}
+			break;
+		case 'C':
+			count_per_domain = atoi(optarg);
+			if (count_per_domain <= 0) {
+				printf("invalid param: %s\n", optarg);
+				help(argv[0]);
+			}
 			break;
 		case 'd':
 			debug_level++;
@@ -439,6 +456,9 @@ help:
 
 	i = 0;
 
+	debug_print(PRINT_NOTICE, "prepare to dns test: " NIPQUAD_FMT " => " NIPQUAD_FMT "\n", NIPQUAD(src_ips[0]), NIPQUAD(dst_ips[0]));
+	debug_print(PRINT_NOTICE, "=====================================\n");
+
 	while (1) {
 		__be32 saddr, daddr;
 
@@ -457,12 +477,14 @@ help:
 
 			while (1) {
 				struct query *q;
+				int k = 0;
 
 				fd = xsocket(AF_INET, SOCK_DGRAM, 0);
 
 				if (!sport) {
 					break;
 				}
+
 				addr.sin_addr.s_addr = saddr;
 				addr.sin_port = htons(sport++);
 				xbind(fd, (struct sockaddr *)&addr, sizeof(addr));
@@ -476,10 +498,14 @@ help:
 						NIPQUAD(daddr), 53);
 
 				q = add_query(T_A, domain);
-			
-				send_query(fd, q);
+
+				while (k++ < count_per_domain)
+					send_query(fd, q);
 
 				close(fd);
+
+				if (total_count && ++loop >= total_count)
+					break;
 			}
 		}
 	}
