@@ -176,15 +176,35 @@ struct fd_ready {
 	int count;
 };
 
+static int timeout_check(int stat[], fd_set *rfds, int fd_to_exclude)
+{
+	int t = time(NULL);
+	int i;
+
+	for (i = 0; i < FD_SETSIZE; i++) {
+		if (i == fd_to_exclude || !FD_ISSET(i, rfds))
+			continue;
+
+		if (t - stat[i] >= 30) {
+			debug_print(PRINT_NOTICE, "fd %d is timed out\n", i);
+			FD_CLR(i, rfds);
+			close(i);
+		}
+	}
+
+	return 0;
+}
+
 static int process_packets(int default_fd, int show, int echo, int new, int dport)
 {
 	char recv_buf[1024 * 10];
 	int ret, nfds = default_fd + 1, connected_fd;
 	fd_set rfds, rfds_orig;
-	struct fd_ready rfds_ready;
+	struct fd_ready rfds_ready = {};
 	struct timeval tv;
 	struct sockaddr_in from = {}, to = {};
 	socklen_t addrlen = sizeof(struct sockaddr_in);
+	int statistics[FD_SETSIZE];
 
 	FD_ZERO(&rfds_orig);
 	FD_SET(default_fd, &rfds_orig);
@@ -194,7 +214,7 @@ static int process_packets(int default_fd, int show, int echo, int new, int dpor
 
 		for (i = 0; i < rfds_ready.count; i++) {
 			if (FD_ISSET(i, &rfds_ready.fds)) {
-				debug_print(PRINT_INFO, "fd %d is ready\n", i);
+				debug_print(PRINT_INFO, "get fd %d from ready queue\n", i);
 
 				FD_CLR(i, &rfds_ready.fds);
 
@@ -211,6 +231,8 @@ static int process_packets(int default_fd, int show, int echo, int new, int dpor
 		switch (ret) {
 		case 0:
 			debug_print(PRINT_DEBUG, "Timeout\n");
+
+			timeout_check(statistics, &rfds_orig, default_fd);
 			continue;
 		case -1:
 			debug_print(PRINT_EMERG, "select failed(%s) and will exit\n", strerror(errno));
@@ -229,7 +251,12 @@ static int process_packets(int default_fd, int show, int echo, int new, int dpor
 					continue;
 				}
 
-				FD_SET(i, &rfds_orig);
+				debug_print(PRINT_NOTICE, "add fd %d to ready queue\n", i);
+
+				FD_SET(i, &rfds_ready.fds);
+
+				if (i >= rfds_ready.count)
+					rfds_ready.count = i + 1;
 			}
 		}
 
@@ -244,6 +271,8 @@ rx:
 			netflow_pkts_total++;
 
 			to.sin_port = htons(dport);
+
+			statistics[cur_fd] = time(NULL);
 
 			debug_print(PRINT_NOTICE, "recv pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u @fd %d\n", ret,
 				NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port),
@@ -280,6 +309,8 @@ rx:
 				nfds = connected_fd + 1;
 
 			cur_fd = connected_fd;
+
+			statistics[cur_fd] = time(NULL);
 		}
 
 		if (echo) {
@@ -442,7 +473,7 @@ int main(int argc, char *argv[])
 		goto error;
 	}
 
-	printf("Listenning on %s:%d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+	printf("Listening on %s:%d on fd %d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), fd);
 
 	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
 		perror("setsockopt for SO_REUSEADDR");
