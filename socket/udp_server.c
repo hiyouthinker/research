@@ -1,7 +1,7 @@
 /* 
  * UDP Server
  *		Author: BigBro
- *		Date:	2019/2020/2021/2022
+ *		Date:	2019 - 2023
  */
 
 #include <stdio.h>
@@ -130,77 +130,175 @@ static ssize_t recv_from_to(int fd, void *buf, size_t len, int flags,
 	return recv_length;
 }
 
-static int process_packets(int fd, int show, int echo, int port)
+static int new_connection(struct sockaddr_in *laddr, struct sockaddr_in *raddr)
+{
+	int fd, on = 1;
+
+	fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (fd < 0) {
+		perror("socket");
+		goto error;
+	}
+
+	debug_print(PRINT_NOTICE, "Prepare to bind to "NIPQUAD_FMT":%u\n",
+		NIPQUAD(laddr->sin_addr.s_addr), ntohs(laddr->sin_port));
+
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
+		perror("setsockopt for SO_REUSEADDR");
+		goto error;
+	}
+
+	if (bind(fd, (struct sockaddr *)laddr, sizeof(*laddr)) < 0) {
+		perror("bind");
+		goto error;
+	}
+
+	if (connect(fd, (struct sockaddr *)raddr, sizeof(*raddr)) < 0) {
+		perror("connect");
+		goto error;
+	}
+
+	debug_print(PRINT_NOTICE, "connected to "NIPQUAD_FMT":%u from "NIPQUAD_FMT":%u\n",
+			NIPQUAD(raddr->sin_addr.s_addr), ntohs(raddr->sin_port),
+			NIPQUAD(laddr->sin_addr.s_addr), ntohs(laddr->sin_port));
+
+	return fd;
+
+error:
+	sleep(10);
+	if (fd >= 0)
+		close(fd);
+	return -1;
+}
+
+struct fd_ready {
+	fd_set fds;
+	int count;
+};
+
+static int process_packets(int default_fd, int show, int echo, int new, int dport)
 {
 	char recv_buf[1024 * 10];
-	int ret, nfds = fd + 1;
-	fd_set rfds;
+	int ret, nfds = default_fd + 1, connected_fd;
+	fd_set rfds, rfds_orig;
+	struct fd_ready rfds_ready;
 	struct timeval tv;
 	struct sockaddr_in from = {}, to = {};
 	socklen_t addrlen = sizeof(struct sockaddr_in);
 
-re_recv:
-	FD_ZERO(&rfds);
-	FD_SET(fd, &rfds);
+	FD_ZERO(&rfds_orig);
+	FD_SET(default_fd, &rfds_orig);
 
-	tv.tv_sec = 5;
-	tv.tv_usec = 0;
+	while (1) {
+		int i = 0, cur_fd = -1;
 
-	ret = select(nfds, &rfds, NULL, NULL, &tv);
-	switch (ret) {
-	case 0:
-		debug_print(PRINT_DEBUG, "Timeout\n");
-		goto re_recv;
-	case -1:
-		debug_print(PRINT_EMERG, "select failed(%s) and will exit\n", strerror(errno));
-		exit(1);
-	default:
-		debug_print(PRINT_DEBUG, "readable socket num : %d\n", ret);
-		break;
-	}
+		for (i = 0; i < rfds_ready.count; i++) {
+			if (FD_ISSET(i, &rfds_ready.fds)) {
+				debug_print(PRINT_INFO, "fd %d is ready\n", i);
 
-	if (FD_ISSET(fd, &rfds)) {
-		debug_print(PRINT_DEBUG, "fd %d is readable\n", fd);
-	}
+				FD_CLR(i, &rfds_ready.fds);
 
-	memset(recv_buf, 0, sizeof(recv_buf));
-	ret = recv_from_to(fd, recv_buf, sizeof(recv_buf), 0, &from, &to, addrlen);
-	if (ret <= 0) {
-		debug_print(PRINT_EMERG, "recv: %s, prepare to close fd and exit.\n", strerror(errno));
-		sleep(2);
-		close(fd);
-		exit(1);
-	} else {
-		netflow_pkts_total++;
-
-		debug_print(PRINT_NOTICE, "recv pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n", ret
-			, NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port)
-			, NIPQUAD(to.sin_addr), port);
-		debug_print(PRINT_DEBUG, "content: [%s]\n", recv_buf);
-
-		if (show > 1) {
-			printf("recv length: %d\n", ret);
-			printf("\t%s\n", recv_buf);
-		} else if (show) {
-			printf(".");
-			fflush(NULL);
+				goto rx;
+			}
 		}
-	}
 
-	if (echo) {
-		debug_print(PRINT_NOTICE, "sent pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n", ret
-			, NIPQUAD(to.sin_addr.s_addr),  port
-			, NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port));
+		rfds = rfds_orig;
+
+		tv.tv_sec = 5;
+		tv.tv_usec = 0;
+
+		ret = select(nfds, &rfds, NULL, NULL, &tv);
+		switch (ret) {
+		case 0:
+			debug_print(PRINT_DEBUG, "Timeout\n");
+			continue;
+		case -1:
+			debug_print(PRINT_EMERG, "select failed(%s) and will exit\n", strerror(errno));
+			exit(1);
+		default:
+			debug_print(PRINT_DEBUG, "readable socket num : %d\n", ret);
+			break;
+		}
+
+		for (i = 0; i < nfds; i++) {
+			if (FD_ISSET(i, &rfds)) {
+				debug_print(PRINT_INFO, "fd %d is ready\n", i);
+
+				if (cur_fd == -1) {
+					cur_fd = i;
+					continue;
+				}
+
+				FD_SET(i, &rfds_orig);
+			}
+		}
+
+rx:
+		memset(recv_buf, 0, sizeof(recv_buf));
+		ret = recv_from_to(cur_fd, recv_buf, sizeof(recv_buf), 0, &from, &to, addrlen);
+		if (ret <= 0) {
+			debug_print(PRINT_EMERG, "recv: %s, prepare to close fd and exit.\n", strerror(errno));
+			sleep(2);
+			exit(1);
+		} else {
+			netflow_pkts_total++;
+
+			to.sin_port = htons(dport);
+
+			debug_print(PRINT_NOTICE, "recv pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u @fd %d\n", ret,
+				NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port),
+				NIPQUAD(to.sin_addr.s_addr), ntohs(to.sin_port),
+				cur_fd);
+
+			debug_print(PRINT_DEBUG, "content: [%s]\n", recv_buf);
+
+			if (show > 1) {
+				printf("recv length: %d\n", ret);
+				printf("\t%s\n", recv_buf);
+			} else if (show) {
+				printf(".");
+				fflush(NULL);
+			}
+		}
 
 		/* avoid fragmenting packets */
 		if (ret > 1000)
 			ret = 1000;
 
-		if (send_to_from(fd, recv_buf, ret, 0, &from, &to, addrlen) < 0) {
-			debug_print(PRINT_EMERG, "send failed: %s.\n", strerror(errno));
+		if (new && cur_fd == default_fd) {
+			connected_fd = new_connection(&to, &from);
+			if (connected_fd < 0) {
+				debug_print(PRINT_EMERG, "failed to new connection for "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u\n",
+					NIPQUAD(to.sin_addr.s_addr),  ntohs(to.sin_port),
+					NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port));
+				exit(1);
+			}
+
+			FD_SET(connected_fd, &rfds_orig);
+
+			if (connected_fd >= nfds)
+				nfds = connected_fd + 1;
+
+			cur_fd = connected_fd;
+		}
+
+		if (echo) {
+			debug_print(PRINT_NOTICE, "sent pkt (%d bytes) "NIPQUAD_FMT":%u => "NIPQUAD_FMT":%u @fd %d\n", ret,
+				NIPQUAD(to.sin_addr.s_addr),  ntohs(to.sin_port),
+				NIPQUAD(from.sin_addr.s_addr), ntohs(from.sin_port),
+				cur_fd);
+
+			if (new) {
+				if (send(cur_fd, recv_buf, ret, 0) < 0) {
+					debug_print(PRINT_EMERG, "failed to send: %s.\n", strerror(errno));
+				}
+			} else {
+				if (send_to_from(cur_fd, recv_buf, ret, 0, &from, &to, addrlen) < 0) {
+					debug_print(PRINT_EMERG, "failed to sendmsg: %s.\n", strerror(errno));
+				}
+			}
 		}
 	}
-	goto re_recv;
 }
 
 #define TIME_INTERVAL(a, b) ((a.tv_sec * 1000000 + a.tv_usec) - (b.tv_sec * 1000000 + b.tv_usec))
@@ -239,7 +337,7 @@ static void sig_handler(int signo)
 
 int main(int argc, char *argv[])
 {
-	int opt, fd = -1, len, ret, on = 1;
+	int opt, fd = -1, ret, on = 1;
 	struct sockaddr_in addr = {
 		.sin_family = AF_INET,
 	};
@@ -337,14 +435,19 @@ int main(int argc, char *argv[])
 		goto error;
 	}
 
-	len = sizeof(struct sockaddr_in);
-
 	printf("Prepare to bind to %s:%d for UDP socket\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
-	if (bind(fd, (struct sockaddr *)&addr, len) < 0) {
+
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) < 0) {
 		perror("bind");
 		goto error;
 	}
-	printf("bind successful\n");
+
+	printf("Listenning on %s:%d\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
+		perror("setsockopt for SO_REUSEADDR");
+		goto error;
+	}
 
 	if (setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &on, sizeof(on)) < 0) {
 		perror("setsockopt for IP_PKTINFO");
@@ -386,7 +489,7 @@ int main(int argc, char *argv[])
 		sleep(5);
 	}
 
-	process_packets(fd, show, echo, ntohs(addr.sin_port));
+	process_packets(fd, show, echo, 1, ntohs(addr.sin_port));
 error:
 	if (fd >= 0)
 		close(fd);
