@@ -117,9 +117,21 @@ redirect_cpu_proc_show(struct seq_file *m, void *v)
 			if (!queue) {
 				seq_printf(m, "CPU%d: queue is nullptr\n", i);
 			} else {
-				seq_printf(m, "CPU%d: batch/size: %d/%d, tail/head: %d/%d, producer: %d, unread data length: %d\n",i,
-						queue->batch, queue->size,
-						queue->consumer_tail, queue->consumer_head, queue->producer, queue->producer - queue->consumer_head);
+				int batch, size, tail, head, producer, unread;
+
+				batch = queue->batch;
+				size = queue->size;
+				tail = queue->consumer_tail;
+				head = queue->consumer_head;
+				producer = queue->producer;
+
+				unread = producer - head;
+				if (unread < 0) {
+					unread += size;
+				}
+
+				seq_printf(m, "CPU%d: batch/size: %d/%d, tail/head: %d/%d, producer: %d, unread data length: %d\n",
+						i, batch, size, tail, head, producer, unread);
 			}
 		}
 #endif
