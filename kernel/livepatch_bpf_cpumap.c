@@ -12,7 +12,6 @@
 #include <linux/kernel.h>
 #include <linux/livepatch.h>
 #include <linux/netdevice.h>
-#include <linux/kprobes.h>
 #include <linux/bpf.h>
 #include <linux/version.h>
 

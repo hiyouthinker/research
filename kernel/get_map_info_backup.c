@@ -9,7 +9,6 @@
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
 #include <net/net_namespace.h>
-#include <linux/kprobes.h>
 #include <linux/jhash.h> // for jhash
 #include <linux/bpf.h>
 #include <linux/math.h>   // for round_up

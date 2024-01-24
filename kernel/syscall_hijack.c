@@ -4,7 +4,6 @@
 
 #include <linux/module.h>
 #include <linux/unistd.h> /* for __NR_xxx */
-#include <linux/kprobes.h>
 
 #define SYSCALL_NUM	__NR_rename
 //#define SET_REG_FOR_PERM

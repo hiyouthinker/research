@@ -8,7 +8,6 @@
 #include <linux/proc_fs.h>
 #include <net/net_namespace.h>
 #include <net/ip.h>
-#include <linux/kprobes.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("BigBro");
