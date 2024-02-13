@@ -28,6 +28,7 @@ static void usage(char *cmd)
 	printf("\t-p\tlocal port\n");
 	printf("\t-r\tenable reuseaddr\n");
 	printf("\t-R\tenable reuseport\n");
+	printf("\t-d\tenable defer accept\n");
 	printf("\t-k\tenable keepalive\n");
 	printf("\t-f\tTCP Fast Open\n");
 	exit(0);
@@ -121,12 +122,12 @@ int main(int argc, char *argv[])
 	int opt, fd = -1, port = 80, len;
 	char *local_ip = "0.0.0.0";
 	struct sockaddr_in addr;
-	int reuseaddr = 0, reuseport = 0, accept_fd;
+	int reuseaddr = 0, reuseport = 0, defer = 0, accept_fd;
 	int keepalive_interval = 3, keepalive = 0, one = 1;
 	int tcp_fast_open = -1;
 	struct linger linger = {0, 0};
 
-	while ((opt = getopt(argc, argv, "l:L:p:rRk:f:h")) != -1) {
+	while ((opt = getopt(argc, argv, "l:L:p:rRd:k:f:h")) != -1) {
 		switch (opt) {
 		case 'l':
 			local_ip = optarg;
@@ -145,6 +146,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'R':
 			reuseport = 1;
+			break;
+		case 'd':
+			defer = atoi(optarg);;
 			break;
 		case 'k':
 			keepalive = atoi(optarg);
@@ -199,6 +203,11 @@ int main(int argc, char *argv[])
 		setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&keepalive_interval, sizeof(keepalive_interval));
 //		setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, (void *)&keepalive_interval, sizeof(keepalive_interval));
 		setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive, sizeof(keepalive));
+	}
+
+	if (defer > 0 && setsockopt(fd, IPPROTO_TCP, TCP_DEFER_ACCEPT, &defer, sizeof(int)) < 0) {
+		perror("setsockopt for defer_accept");
+		goto error;
 	}
 
 	if ((tcp_fast_open > 0) && setsockopt(fd, IPPROTO_TCP, TCP_FASTOPEN, (void *) &tcp_fast_open, sizeof(int))) {
