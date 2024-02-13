@@ -28,6 +28,8 @@
 #endif
 #endif
 
+#include "get_kallsyms_lookup_name.c"
+
 static char *name;
 module_param(name, charp, 0);
 MODULE_PARM_DESC(name, "interface name");
@@ -40,11 +42,26 @@ static int __init get_common_infos_init(void)
 {
 	struct net_device *dev;
 	struct in_device *in_dev;
+	void **ethtool_phy_ops;
+	int ret;
+	kallsyms_lookup_name_type pkallsyms_lookup_name;
 
 	printk("Hello\n");
 
+	ret = get_kallsyms_lookup_name(&pkallsyms_lookup_name);
+	if (ret) {
+		printk("Can't get kallsyms_lookup_name symbol (ret = %d).\n", ret);
+		return -1;
+	}
+
+	ethtool_phy_ops = (void **)pkallsyms_lookup_name("ethtool_phy_ops");
+	if (!ethtool_phy_ops) {
+		printk("Can't get ethtool_phy_ops symbol.\n");
+		return -1;
+	}
+
 	if (!name) {
-		name = "eth0";
+		name = "eth12";
 	}
 
 	dev = dev_get_by_name(current->nsproxy->net_ns, name);
@@ -63,6 +80,18 @@ static int __init get_common_infos_init(void)
 	}
 
 	rcu_read_unlock();
+
+	printk("%s: dev->phydev: %pK, ethtool_phy_ops: %pK @%pK, netdev_ops: %pK\n",
+		dev->name, dev->phydev,
+		*ethtool_phy_ops,
+		ethtool_phy_ops,
+		dev->netdev_ops);
+
+	printk("%s: num_tc: %d\n", dev->name, dev->num_tc);
+
+	if (dev->netdev_ops) {
+		printk("%s: ndo_rx_flow_steer: %pK\n", dev->name, dev->netdev_ops->ndo_rx_flow_steer);
+	}
 
 #if 0
 	printk("dev %s: type: %u, features: %llx\n", dev->name, dev->type, dev->features);
