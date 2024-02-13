@@ -18,18 +18,9 @@
 #include <percpu_freelist.h>
 #include <bpf_lru_list.h>
 
-#define PRINT_KEY_VALUE
-#define USE_KALLSYSMS_LOOKUP
-
-#ifndef USE_KALLSYSMS_LOOKUP
-static unsigned long pbpf_map_fops = 0xffffffffa20363a0;
-module_param(pbpf_map_fops, ulong, 0);
-MODULE_PARM_DESC(pbpf_map_fops, "pointer to bpf_map_fops");
-#else
 #include "get_kallsyms_lookup_name.c"
 
 static struct bpf_map *(*pbpf_map_get)(u32 ufd) = NULL;
-#endif
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("BigBro");
@@ -41,6 +32,9 @@ MODULE_DESCRIPTION("print map infos");
 #define LOCAL_PENDING_LIST_IDX	LOCAL_LIST_IDX(BPF_LRU_LOCAL_LIST_T_PENDING)
 #define IS_LOCAL_LIST_TYPE(t)	((t) >= BPF_LOCAL_LIST_T_OFFSET)
 
+#define HASHTAB_MAP_LOCK_COUNT 8
+#define HASHTAB_MAP_LOCK_MASK (HASHTAB_MAP_LOCK_COUNT - 1)
+
 struct bucket {
 	struct hlist_nulls_head head;
 	union {
@@ -48,9 +42,6 @@ struct bucket {
 		spinlock_t     lock;
 	};
 };
-
-#define HASHTAB_MAP_LOCK_COUNT 8
-#define HASHTAB_MAP_LOCK_MASK (HASHTAB_MAP_LOCK_COUNT - 1)
 
 struct bpf_htab {
 	struct bpf_map map;
@@ -69,7 +60,6 @@ struct bpf_htab {
 	int __percpu *map_locked[HASHTAB_MAP_LOCK_COUNT];
 };
 
-#ifdef PRINT_KEY_VALUE
 static int control = 0;
 
 struct bpf_timer_kern {
@@ -110,58 +100,26 @@ struct htab_elem {
 };
 
 typedef struct flow_key {
-    union {
-        __be32 src;
-        __be32 srcv6[4];
-    };
-    union {
-        __be32 dst;
-        __be32 dstv6[4];
-    };
-    union {
-        __be32 ports;
-        __be16 port16[2];
-        struct {
-            __be16 id;
-            __u16 zeroed;
-        };
-    };
-    __u8 proto;
+	union {
+		__be32 src;
+		__be32 srcv6[4];
+	};
+	union {
+		__be32 dst;
+		__be32 dstv6[4];
+	};
+	__be16 port16[2];
+	__u8 proto;
 } flow_key_t;
 
 typedef struct flow_value {
-    struct flow_key key;
-    __u32 flags;
-    union {
-        union {
-            __be32 ports;
-            __be16 port16[2];
-        };
-        __be16 ip_id;
-    };
-    union {
-        __u32 seq;
-        __u32 seq_client;
-    };
-    union {
-        __u32 ack;
-        __u32 seq_server;
-    };
-    union {
-        __u8 cpu_id_for_session;
-        __u8 cpu_id_for_nat;
-    };
-    __u8 state;
-    __u8 reserved[2];
-    struct bpf_timer timer;
-    __u32 expires;
+	struct flow_key key;
+	__u8 padding[64];
+	struct bpf_timer timer;
 } flow_value_t;
-#endif
 
 static struct proc_dir_entry *map_dir;
 static int map_fd = -1;
-
-
 
 static ssize_t 
 map_print_proc_write(struct file *file, const char __user *buffer,
@@ -187,11 +145,6 @@ map_print_proc_write(struct file *file, const char __user *buffer,
 	return count;
 }
 
-static struct list_head *free_list(struct bpf_common_lru *clru)
-{
-	return &clru->lru_list.lists[BPF_LRU_LIST_T_FREE];
-}
-
 static struct list_head *active_list(struct bpf_common_lru *clru)
 {
 	return &clru->lru_list.lists[BPF_LRU_LIST_T_ACTIVE];
@@ -202,17 +155,11 @@ static struct list_head *inactive_list(struct bpf_common_lru *clru)
 	return &clru->lru_list.lists[BPF_LRU_LIST_T_INACTIVE];
 }
 
-static struct list_head *local_free_list(struct bpf_lru_locallist *loc_l)
-{
-	return &loc_l->lists[LOCAL_FREE_LIST_IDX];
-}
-
 static struct list_head *local_pending_list(struct bpf_lru_locallist *loc_l)
 {
 	return &loc_l->lists[LOCAL_PENDING_LIST_IDX];
 }
 
-#ifdef PRINT_KEY_VALUE
 static void bpf_timer_show(struct bpf_lru_node *node, struct bpf_map *map)
 {
 	flow_key_t *key;
@@ -253,36 +200,6 @@ static void bpf_timer_show(struct bpf_lru_node *node, struct bpf_map *map)
 
 	control = 1;
 }
-#endif
-
-#ifndef USE_KALLSYSMS_LOOKUP
-static struct bpf_map *____bpf_map_get(struct fd f)
-{
-	if (!f.file)
-		return ERR_PTR(-EBADF);
-	if (f.file->f_op != (void *)pbpf_map_fops) {
-		fdput(f);
-		return ERR_PTR(-EINVAL);
-	}
-
-	return f.file->private_data;
-}
-
-static struct bpf_map *pbpf_map_get(u32 ufd)
-{
-	struct fd f = fdget(ufd);
-	struct bpf_map *map;
-
-	map = ____bpf_map_get(f);
-	if (IS_ERR(map))
-		return map;
-
-	bpf_map_inc(map);
-	fdput(f);
-
-	return map;
-}
-#endif
 
 static inline struct bucket *__select_bucket(struct bpf_htab *htab, u32 hash)
 {
@@ -308,11 +225,7 @@ map_print_proc_show(struct seq_file *m, void *v)
 	struct bpf_common_lru *clru;
 	struct bpf_lru_node *node;
 	unsigned long flags;
-	int cpu, free_count = 0;
-	int local_pending_count, local_free_count, total_pending_count = 0, total_free_count = 0;
-	int active_ref1 = 0, inactive_ref1 = 0, local_pending_ref1 = 0;
-	int active_ref2 = 0, active_total = 0, inactive_total = 0;
-	int total = 0;
+	int cpu;
 	int i = 0, j = 0;
 	u32 hash, key_size;
 	struct hlist_nulls_head *head;
@@ -334,8 +247,6 @@ map_print_proc_show(struct seq_file *m, void *v)
 		htab->n_buckets);
 
 	seq_printf(m, "key_size/value_size: %u/%u\n", htab->map.key_size, htab->map.value_size);
-
-	key_size = htab->map.key_size;
 
 	for (; i < htab->n_buckets; i++) {
 		char buf[512] = {0};
@@ -368,109 +279,31 @@ map_print_proc_show(struct seq_file *m, void *v)
 
 	clru = &htab->lru.common_lru;
 
-	list_for_each_entry(node, free_list(clru), list) {
-		free_count++;
-	}
-
 	list_for_each_entry_reverse(node, active_list(clru), list) {
-#ifdef PRINT_KEY_VALUE
 		bpf_timer_show(node, map);
-#endif
-		if (node->ref) {
-			active_ref1++;
-			if (active_total < 128)
-				active_ref2++;
-		}
-		active_total++;
 	}
 
-#ifdef PRINT_KEY_VALUE
 	control = 0;
-#endif
 
 	list_for_each_entry(node, inactive_list(clru), list) {
-#ifdef PRINT_KEY_VALUE
 		bpf_timer_show(node, map);
-#endif
-		if (node->ref)
-			inactive_ref1++;
-		inactive_total++;
 	}
 
-#ifdef PRINT_KEY_VALUE
 	control = 0;
-#endif
 
 	for_each_possible_cpu(cpu) {
-		local_pending_count = 0;
-		local_free_count = 0;
-		local_pending_ref1 = 0;
-
 		loc_l = per_cpu_ptr(clru->local_list, cpu);
 
 		raw_spin_lock_irqsave(&loc_l->lock, flags);
 
 		list_for_each_entry(node, local_pending_list(loc_l), list) {
-#ifdef PRINT_KEY_VALUE
 			bpf_timer_show(node, map);
-#endif
-			local_pending_count++;
-			if (node->ref)
-				local_pending_ref1++;
 		}
 
-#ifdef PRINT_KEY_VALUE
 		control = 0;
-#endif
-
-		list_for_each_entry(node, local_free_list(loc_l), list) {
-			local_free_count++;
-		}
-
-		total_pending_count += local_pending_count;
-		total_free_count += local_free_count;
 
 		raw_spin_unlock_irqrestore(&loc_l->lock, flags);
-
-		seq_printf(m,
-			"CPU%d\n"
-			"\t%-13s: %d (ref: %d)\n"
-			"\t%-13s: %d\n",
-			cpu,
-			"LOCAL_PENDING",
-			local_pending_count,
-			local_pending_ref1,
-			"LOCAL_FREE",
-			local_free_count);
 	}
-
-	total = clru->lru_list.counts[BPF_LRU_LIST_T_ACTIVE] + clru->lru_list.counts[BPF_LRU_LIST_T_INACTIVE] +
-			free_count + total_pending_count + total_free_count;
-
-	seq_printf(m,
-		"Global\n"
-		"\t%-15s: %d/%d (ref: %d/%d)\n"
-		"\t%-15s: %d/%d (ref: %d)\n"
-		"\t%-15s: %d\n"
-		"\t%-15s: %d\n"
-		"\t%-15s: %d\n"
-		"\t%-15s: %d\n",
-		"ACTIVE",
-		clru->lru_list.counts[BPF_LRU_LIST_T_ACTIVE],
-		active_total,
-		active_ref1, active_ref2,
-		"INACTIVE",
-		clru->lru_list.counts[BPF_LRU_LIST_T_INACTIVE],
-		inactive_total,
-		inactive_ref1,
-		"FREE",
-		free_count,
-		"ALL_CPU_PENDING",
-		total_pending_count,
-		"ALL_CPU_FREE",
-		total_free_count,
-		"TOTAL",
-		total);
 
 	bpf_map_put(map);
 
@@ -483,7 +316,6 @@ map_print_proc_open(struct inode *inode, struct file *file)
 	return single_open(file, map_print_proc_show, NULL);
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
 static const struct proc_ops map_print_proc_ops = {
 	.proc_open	= map_print_proc_open,
 	.proc_read	= seq_read,
@@ -491,23 +323,12 @@ static const struct proc_ops map_print_proc_ops = {
 	.proc_release = single_release,
 	.proc_write	= map_print_proc_write,
 };
-#else
-static const struct file_operations map_print_proc_ops = {
-	.owner	= THIS_MODULE,
-	.open	= map_print_proc_open,
-	.read	= seq_read,
-	.llseek	= seq_lseek,
-	.release = single_release,
-	.write	= map_print_proc_write,
-};
-#endif
 
 static int __init get_map_info_init(void)
 {
 	struct proc_dir_entry *pde;
 	kallsyms_lookup_name_type pkallsyms_lookup_name;
 
-#ifdef USE_KALLSYSMS_LOOKUP
 	int ret = get_kallsyms_lookup_name(&pkallsyms_lookup_name);
 
 	if (ret) {
@@ -521,9 +342,6 @@ static int __init get_map_info_init(void)
 		return -1;
 	}
 	printk("pbpf_map_get: %pK\n", pbpf_map_get);
-#else
-	printk("pbpf_map_fops: %lx\n", pbpf_map_fops);
-#endif
 
 	map_dir = proc_mkdir("map", init_net.proc_net);
 	if (!map_dir) {
