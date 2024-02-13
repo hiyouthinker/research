@@ -24,7 +24,7 @@ static struct bpf_map *(*pbpf_map_get)(u32 ufd) = NULL;
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("BigBro");
-MODULE_DESCRIPTION("print map infos");
+MODULE_DESCRIPTION("show map infos");
 
 /* Helpers to get the local list index */
 #define LOCAL_LIST_IDX(t)	((t) - BPF_LOCAL_LIST_T_OFFSET)
@@ -147,48 +147,7 @@ static inline u32 htab_map_hash(const void *key, u32 key_len, u32 hashrnd)
 	return jhash(key, key_len, hashrnd);
 }
 
-static int get_first_key(struct bpf_htab *htab, struct seq_file *m)
-{
-	int i = 0, j = 0;
-	u32 hash, key_size;
-	struct hlist_nulls_head *head;
-	struct htab_elem *next;
-
-	key_size = htab->map.key_size;
-
-	for (; i < htab->n_buckets; i++) {
-		char buf[512] = {0};
-		int l = 0;
-
-		head = select_bucket(htab, i);
-
-		/* pick first element in the bucket */
-		next = hlist_nulls_entry_safe(rcu_dereference_raw(hlist_nulls_first_rcu(head)),
-					  struct htab_elem, hash_node);
-		if (next) {
-			/* if it's not empty, just return it */
-			for (j = 0; j < key_size; j++) {
-				l += snprintf(buf + l, sizeof(buf), "%02x ", (0xff & next->key[j]));
-			}
-			seq_printf(m, "[%s]\n", buf);
-
-			hash = htab_map_hash(next->key, key_size, htab->hashrnd);
-
-			seq_printf(m, "hash: %u/%u, hash & 0x%04x: %u, index: %d\n",
-				hash,
-				next->hash,
-				htab->n_buckets - 1,
-				hash & (htab->n_buckets - 1),
-				i);
-			/* got first key */
-			return 1;
-		}
-	}
-
-	return 0;
-}
-
-static int map_print_proc_show(struct seq_file *m, void *v)
+static int detail_proc_show(struct seq_file *m, void *v)
 {
 	struct bpf_map *map;
 	struct bpf_htab *htab;
@@ -202,8 +161,6 @@ static int map_print_proc_show(struct seq_file *m, void *v)
 	int active_ref2 = 0, active_total = 0, inactive_total = 0;
 	int total = 0;
 	u32 key_size;
-
-	printk("map_fd: %d\n", map_fd);
 
 	map = pbpf_map_get(map_fd);
 	if (IS_ERR(map)) {
@@ -221,8 +178,6 @@ static int map_print_proc_show(struct seq_file *m, void *v)
 	key_size = htab->map.key_size;
 
 	seq_printf(m, "key_size/value_size: %u/%u\n", key_size, htab->map.value_size);
-
-	get_first_key(htab, m);
 
 	clru = &htab->lru.common_lru;
 
@@ -314,30 +269,78 @@ static int map_print_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int
-map_print_proc_open(struct inode *inode, struct file *file)
+static int simple_proc_show(struct seq_file *m, void *v)
 {
-	return single_open(file, map_print_proc_show, NULL);
+	struct bpf_map *map;
+	struct bpf_htab *htab;
+	struct bpf_common_lru *clru;
+	char *free_status = "empty";
+
+	map = pbpf_map_get(map_fd);
+	if (IS_ERR(map)) {
+		return PTR_ERR(map);
+	}
+
+	htab = (struct bpf_htab *)map;
+
+	seq_printf(m, "map_fd: %d, map type: %d, max_entries: %u, bucket: %u\n",
+		map_fd,
+		htab->map.map_type,
+		htab->map.max_entries,
+		htab->n_buckets);
+
+	seq_printf(m, "key_size/value_size: %u/%u\n", htab->map.key_size, htab->map.value_size);
+
+	clru = &htab->lru.common_lru;
+	if (!list_empty(free_list(clru))) {
+		free_status = "not empty";
+	}
+
+	seq_printf(m,
+		"Statistics\n"
+		"\t%-15s: %d\n"
+		"\t%-15s: %d\n"
+		"\t%-15s: %s\n"
+		"\t%-15s: %d\n"
+		"\t%-15s: %d\n"
+		"\t%-15s: %d\n",
+		"ACTIVE", clru->lru_list.counts[BPF_LRU_LIST_T_ACTIVE],
+		"INACTIVE", clru->lru_list.counts[BPF_LRU_LIST_T_INACTIVE],
+		"FREE", free_status,
+		"ALL_CPU_PENDING", -1,
+		"ALL_CPU_FREE", -1,
+		"TOTAL", htab->map.max_entries);
+
+	bpf_map_put(map);
+
+	return 0;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
-static const struct proc_ops map_print_proc_ops = {
-	.proc_open	= map_print_proc_open,
+static int detail_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, detail_proc_show, NULL);
+}
+
+static int simple_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, simple_proc_show, NULL);
+}
+
+static const struct proc_ops detail_proc_ops = {
+	.proc_open	= detail_proc_open,
 	.proc_read	= seq_read,
 	.proc_lseek	= seq_lseek,
 	.proc_release = single_release,
 	.proc_write	= map_print_proc_write,
 };
-#else
-static const struct file_operations map_print_proc_ops = {
-	.owner	= THIS_MODULE,
-	.open	= map_print_proc_open,
-	.read	= seq_read,
-	.llseek	= seq_lseek,
-	.release = single_release,
-	.write	= map_print_proc_write,
+
+static const struct proc_ops simple_proc_ops = {
+	.proc_open	= simple_proc_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release = single_release,
+	.proc_write	= map_print_proc_write,
 };
-#endif
 
 static int __init get_map_info_init(void)
 {
@@ -364,16 +367,24 @@ static int __init get_map_info_init(void)
 		goto proc_mkdir_err;
 	}
 
-	pde = proc_create("print_map", 0644, map_dir, &map_print_proc_ops);
+	pde = proc_create("detail", 0644, map_dir, &detail_proc_ops);
 	if (!pde) {
-		printk("Can't create map/print_map.\n");
-		goto proc_create_err;
+		printk("Can't create map/detail.\n");
+		goto proc_create_err1;
+	}
+
+	pde = proc_create("simple", 0644, map_dir, &simple_proc_ops);
+	if (!pde) {
+		printk("Can't create map/simple.\n");
+		goto proc_create_err2;
 	}
 
 	printk("get_map_info module loaded successfully\n");
 	return 0;
 
-proc_create_err:
+proc_create_err2:
+	remove_proc_entry("detail", map_dir);
+proc_create_err1:
 	remove_proc_entry("map", NULL);
 proc_mkdir_err:
 	return -1;
@@ -381,7 +392,8 @@ proc_mkdir_err:
 
 static void __exit get_map_info_cleanup(void)
 {
-	remove_proc_entry("print_map", map_dir);
+	remove_proc_entry("simple", map_dir);
+	remove_proc_entry("detail", map_dir);
 	remove_proc_entry("map", init_net.proc_net);
 
 	printk("get_map_info module unloaded successfully\n");
