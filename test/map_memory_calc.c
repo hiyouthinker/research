@@ -353,6 +353,9 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
+	if (param.type != MAP_TYPE_HASH)
+		goto done;
+
 	while (1) {
 		param.used = num;
 
@@ -373,6 +376,7 @@ int main(int argc, char *argv[])
 			num *= 2;
 	}
 
+done:
 	printf("Done!\n");
 	return 0;
 }
