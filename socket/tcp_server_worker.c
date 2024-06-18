@@ -9,12 +9,15 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/file.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <signal.h>
+#include <stdbool.h>
 
 #define MAX_FD_NUM 512
+#define FLOCK_FILE "/tmp/.file_lock_123"
 
 static void usage(char *cmd)
 {
@@ -29,12 +32,56 @@ static void usage(char *cmd)
 	exit(0);
 }
 
+static int open_flock_file()
+{
+	int fd = open(FLOCK_FILE, O_RDWR | O_CREAT, 0666);
+	if (fd == -1) {
+		printf("failed to open file: %s\n", strerror(errno));
+		exit(1);
+	}
+
+	return fd;
+}
+
+static bool fd_is_readable(int fd)
+{
+	struct timeval tv = {
+		.tv_sec = 0,
+		.tv_usec = 0,
+	};
+	fd_set rfds;
+	int nfds = 0, ret;
+
+	FD_ZERO(&rfds);
+	FD_SET(fd, &rfds);
+
+	if (nfds <= fd)
+		nfds = fd + 1;
+
+	ret = select(nfds, &rfds, NULL, NULL, &tv);
+	
+	switch(ret) {
+	case 0:
+	//	printf("fd %d is not readable\n", fd);
+		return false;
+	case 1:
+	//	printf("fd %d is readable\n", fd);
+		return true;
+	default:
+		printf("failed to select fd %d: %s\n", fd, strerror(errno));
+		break;
+	}
+
+	return false;
+}
+
 static void worker_process(int fd)
 {
-	int listen_fd = fd;
+	int listen_fd = fd, file_fd;
 	int nfds = 0;
 	fd_set rfds, rfds_orig;
-	char buffer[1024] = {0};
+
+	file_fd = open_flock_file();
 
 	FD_ZERO(&rfds);
 	FD_SET(listen_fd, &rfds);
@@ -57,20 +104,34 @@ static void worker_process(int fd)
 		ret = select(nfds, &rfds, NULL, NULL, &tv);
 		switch (ret) {
 		case 0:
-			printf("Timeout...\n");
+		//	printf("Timeout...\n");
 			continue;
 		case -1:
 			printf("select failed(%s) and will exit\n", strerror(errno));
 			exit(1);
 		default:
 			if (FD_ISSET(listen_fd, &rfds)) {
-                len = sizeof(struct sockaddr);
+				len = sizeof(struct sockaddr);
+
+				if (flock(file_fd, LOCK_EX) == -1) {
+					printf("failed to flock file: %s\n", strerror(errno));
+					exit(1);
+				}
+
+				if (!fd_is_readable(listen_fd)) {
+					printf("worker %d: no fd is readable, ingnore.\n", getpid());
+					flock(file_fd, LOCK_UN);
+					continue;
+				}
 
 				fd = accept(listen_fd, (struct sockaddr *)&addr, (socklen_t *)&len);
 				if (fd < 0) {
 					printf("failed to accept: %s\n", strerror(errno));
+					flock(file_fd, LOCK_UN);
 					exit(1);
 				}
+
+				flock(file_fd, LOCK_UN);
 
 				if (fd >= FD_SETSIZE) {
 					printf("too much concurrency (fd = %d), close connection!\n", fd);
@@ -85,15 +146,20 @@ static void worker_process(int fd)
 
 				FD_SET(fd, &rfds_orig);
 			} else {
+				bool readable = false;
+
 				for (i = 0; i < FD_SETSIZE; i++) {
 					fd = i;
 					if (FD_ISSET(fd, &rfds)) {
-						ret = read(fd, buffer, sizeof(buffer) - 1);
-						
+						char buffer[1024] = {0};
+
 						if (getpeername(fd, (struct sockaddr *)&addr, (socklen_t *)&len) != 0) {
 							printf("failed to getpeername: %s\n", strerror(errno));
 							exit(1);
 						}
+
+						ret = read(fd, buffer, sizeof(buffer) - 1);
+						readable = true;
 
 						switch (ret) {
 						case 0:
@@ -114,6 +180,10 @@ static void worker_process(int fd)
 							}
 						}
 					}
+				}
+
+				if (!readable) {
+					printf("worker %d: no fd is readable, ignore..\n", getpid());
 				}
 			}
 			break;
